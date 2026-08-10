@@ -1,0 +1,26 @@
+# environnement Python
+venv/
+__pycache__/
+*.pyc
+
+# donnees telechargees / generees (MNT, OSM, tuiles) - trop volumineux pour git
+*.tif
+*.tiff
+*.asc
+*.7z
+*.gpkg
+*.geojson
+*.mbtiles
+*.pmtiles
+_work_france/
+pmtiles_poc/by_department/
+firebase_deploy/public/*.pmtiles
+
+# logs et etat de pipeline (regenerables)
+*.log
+france_progress.json
+*.bak
+
+# divers
+.DS_Store
+firebase_deploy/.firebase/

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "cote-a-cote-tours"
+  },
+  "targets": {
+    "cote-a-cote-tours": {
+      "hosting": {
+        "app": [
+          "cote-a-cote-app"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

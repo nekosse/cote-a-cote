@@ -1,0 +1,447 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PMTiles Indre-et-Loire - Cote a cote</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  #status {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.95); padding: 6px 14px; border-radius: 8px;
+    font-size: 13px; z-index: 9999; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  #detail {
+    position: fixed; bottom: 24px; right: 15px; z-index: 9999;
+    width: 260px; padding: 16px 20px; border-radius: 14px;
+    background: rgba(255,255,255,0.96); box-shadow: 0 14px 45px rgba(15,23,42,0.28);
+    border-left: 6px solid transparent;
+    opacity: 0; transform: translateY(14px); pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  #detail.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  #detail .name { font-size: 17px; font-weight: 800; margin-bottom: 10px; }
+  #detail .stats { display: flex; gap: 18px; }
+  #detail .stat b { display: block; font-size: 20px; }
+  #detail .stat span { font-size: 10px; color: #6b7280; text-transform: uppercase; }
+  #detail .profile { margin-top: 14px; }
+  #detail .profile svg { width: 100%; height: 52px; display: block; }
+  #detail .profile-range {
+    display: flex; justify-content: space-between;
+    font-size: 10.5px; color: #9ca3af; margin-top: 2px;
+  }
+
+  #select-btn {
+    position: fixed; top: 12px; right: 15px; z-index: 9999;
+    background: rgba(255,255,255,0.95); border: none; border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2); font-family: inherit;
+  }
+  #select-btn.active { background: #2563eb; color: white; }
+  #select-btn.disabled { opacity: 0.45; cursor: not-allowed; }
+
+  #select-rect {
+    position: fixed; z-index: 9998; pointer-events: none;
+    border: 2px dashed #2563eb; background: rgba(37,99,235,0.10);
+    display: none;
+  }
+
+  #select-msg {
+    position: fixed; top: 50px; right: 15px; z-index: 9999;
+    background: rgba(17,24,39,0.92); color: #fff; padding: 7px 12px;
+    border-radius: 8px; font-size: 12px; max-width: 230px; display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+
+  #panel {
+    position: fixed; top: 60px; right: 15px; z-index: 9999;
+    width: 260px; max-height: 65vh; display: none; flex-direction: column;
+    background: rgba(255,255,255,0.96); border-radius: 14px;
+    box-shadow: 0 14px 45px rgba(15,23,42,0.28); overflow: hidden;
+  }
+  #panel-header {
+    padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,0.06);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #panel-header .title { font-weight: 700; font-size: 14px; }
+  #panel-header .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  #panel-close { cursor: pointer; color: #9ca3af; font-size: 18px; line-height: 1; }
+  #panel-close:hover { color: #374151; }
+  #panel-list { list-style: none; margin: 0; padding: 6px 0; overflow-y: auto; }
+  #panel-list li {
+    display: flex; align-items: center; gap: 10px; padding: 7px 16px;
+    cursor: pointer; transition: background .12s;
+  }
+  #panel-list li:hover { background: rgba(37,99,235,0.07); }
+  #panel-list .rank {
+    flex: none; width: 20px; height: 20px; border-radius: 50%; color: white;
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  #panel-list .name { font-weight: 600; font-size: 12.5px; line-height: 1.25; }
+  #panel-list .stats { color: #6b7280; font-size: 11px; margin-top: 1px; }
+  #panel-empty { padding: 16px; font-size: 12.5px; color: #6b7280; }
+</style>
+</head>
+<body>
+<div id="status">chargement...</div>
+<button id="select-btn">&#9635; Selectionner une zone</button>
+<div id="select-rect"></div>
+<div id="select-msg"></div>
+<div id="panel">
+  <div id="panel-header">
+    <div>
+      <div class="title">Cotes de la zone</div>
+      <div class="sub" id="panel-sub"></div>
+    </div>
+    <span id="panel-close">&times;</span>
+  </div>
+  <ul id="panel-list"></ul>
+</div>
+<div id="detail"></div>
+<div id="map"></div>
+<script>
+  const pmProtocol = new pmtiles.Protocol();
+  maplibregl.addProtocol("pmtiles", pmProtocol.tile);
+
+  const map = new maplibregl.Map({
+    container: "map",
+    center: [2.8, 46.4],
+    zoom: 5.7,
+    style: {
+      version: 8,
+      glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+      sources: {
+        basemap: {
+          type: "raster",
+          tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
+          tileSize: 256,
+          attribution: "&copy; OpenStreetMap &copy; CARTO",
+        },
+        climbs: {
+          type: "vector",
+          url: "pmtiles://climbs_france.pmtiles",
+          promoteId: "idx",
+        },
+      },
+      layers: [
+        { id: "basemap", type: "raster", source: "basemap" },
+        {
+          id: "climbs-line",
+          type: "line",
+          source: "climbs",
+          "source-layer": "climbs",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": [
+              "case",
+              ["boolean", ["feature-state", "hover"], false], 6,
+              2.5,
+            ],
+            "line-opacity": 0.85,
+          },
+        },
+        {
+          id: "climbs-zone",
+          type: "line",
+          source: "climbs",
+          "source-layer": "climbs",
+          layout: { "line-cap": "round", "line-join": "round" },
+          filter: ["in", ["get", "idx"], ["literal", []]],
+          paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 1 },
+        },
+        {
+          id: "climbs-halo",
+          type: "line",
+          source: "climbs",
+          "source-layer": "climbs",
+          layout: { "line-cap": "round", "line-join": "round" },
+          filter: ["==", ["get", "idx"], -1],
+          paint: { "line-color": ["get", "color"], "line-width": 13, "line-opacity": 0.32 },
+        },
+      ],
+    },
+  });
+
+  const statusEl = document.getElementById("status");
+  const detailEl = document.getElementById("detail");
+
+  let hoveredId = null;
+  let selectedId = null;
+  const N_CLIMBS = 286897; // 80/102 departements traites (pipeline France en cours), calcule au build
+
+  map.on("load", () => {
+    statusEl.textContent = N_CLIMBS + " cotes (80/102 departements, France en cours) - survolez, cliquez, ou selectionnez une zone";
+  });
+
+  map.on("mousemove", "climbs-line", (e) => {
+    if (!e.features.length) return;
+    map.getCanvas().style.cursor = "pointer";
+    const f = e.features[0];
+    if (hoveredId !== null && hoveredId !== f.id) {
+      map.setFeatureState({ source: "climbs", sourceLayer: "climbs", id: hoveredId }, { hover: false });
+    }
+    hoveredId = f.id;
+    map.setFeatureState({ source: "climbs", sourceLayer: "climbs", id: hoveredId }, { hover: true });
+  });
+
+  map.on("mouseleave", "climbs-line", () => {
+    map.getCanvas().style.cursor = "";
+    if (hoveredId !== null) {
+      map.setFeatureState({ source: "climbs", sourceLayer: "climbs", id: hoveredId }, { hover: false });
+    }
+    hoveredId = null;
+  });
+
+  function lineBounds(geometry) {
+    const lines = geometry.type === "MultiLineString" ? geometry.coordinates : [geometry.coordinates];
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    for (const line of lines) {
+      for (const [lng, lat] of line) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+    return [[minLng, minLat], [maxLng, maxLat]];
+  }
+
+  const PROFILE_COLORS = ["#37b24d", "#f7b731", "#f2762e", "#e63946"];
+
+  function profileSvg(profileStr, gradesStr, fallbackColor) {
+    const vals = (profileStr || "").split(",").map(Number).filter((v) => !isNaN(v));
+    if (vals.length < 2) return "";
+    const grades = (gradesStr || "").split(",").map(Number);
+    const w = 260, h = 60, pad = 2;
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const range = Math.max(max - min, 1);
+    const pts = vals.map((v, i) => {
+      const x = pad + (i / (vals.length - 1)) * (w - 2 * pad);
+      const y = h - pad - ((v - min) / range) * (h - 2 * pad);
+      return [x, y];
+    });
+    const ptsStr = pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+    const area = ptsStr + " " + (w - pad) + "," + (h - pad) + " " + pad + "," + (h - pad);
+    let segs = "";
+    for (let i = 0; i < pts.length - 1; i++) {
+      const c = PROFILE_COLORS[grades[i]] ?? fallbackColor;
+      segs += '<line x1="' + pts[i][0].toFixed(1) + '" y1="' + pts[i][1].toFixed(1) +
+        '" x2="' + pts[i + 1][0].toFixed(1) + '" y2="' + pts[i + 1][1].toFixed(1) +
+        '" stroke="' + c + '" stroke-width="2.5" stroke-linecap="round"></line>';
+    }
+    return '<div class="profile">' +
+      '<svg viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none">' +
+      '<polygon points="' + area + '" fill="#9ca3af" opacity="0.14"></polygon>' + segs +
+      "</svg>" +
+      '<div class="profile-range"><span>' + Math.round(min) + " m</span><span>" + Math.round(max) + " m</span></div>" +
+      "</div>";
+  }
+
+  function selectClimb(f, opts) {
+    opts = opts || {};
+    selectedId = f.id;
+    map.setFilter("climbs-halo", ["==", ["get", "idx"], f.properties.idx]);
+
+    if (!opts.skipFly) {
+      map.fitBounds(lineBounds(f.geometry), {
+        padding: { top: 60, right: 300, bottom: 180, left: 60 },
+        maxZoom: 16,
+        duration: 800,
+      });
+    }
+
+    const p = f.properties;
+    detailEl.style.borderLeftColor = p.color;
+    detailEl.innerHTML =
+      '<div class="name">' + p.name + "</div>" +
+      '<div class="stats">' +
+      '<div class="stat"><b style="color:' + p.color + '">' + p.avg_grade.toFixed(1) + '%</b><span>pente</span></div>' +
+      '<div class="stat"><b>' + p.length_m + '</b><span>longueur</span></div>' +
+      '<div class="stat"><b>+' + p.elev_gain_m + '</b><span>deniv.</span></div>' +
+      "</div>" +
+      profileSvg(p.profile, p.profile_grades, p.color);
+    detailEl.classList.add("show");
+  }
+
+  function clearSelection() {
+    map.setFilter("climbs-halo", ["==", ["get", "idx"], -1]);
+    detailEl.classList.remove("show");
+    selectedId = null;
+  }
+
+  map.on("click", "climbs-line", (e) => {
+    if (!e.features.length) return;
+    selectClimb(e.features[0]);
+  });
+
+  map.on("click", (e) => {
+    if (selecting) return;
+    const feats = map.queryRenderedFeatures(e.point, { layers: ["climbs-line"] });
+    if (feats.length === 0) clearSelection();
+  });
+
+  // --- selection de zone (glisser un rectangle) ---
+  // A bas zoom (France entiere), tippecanoe masque une grande partie des cotes
+  // pour respecter les limites de taille des tuiles (cf --drop-densest-as-needed) :
+  // une selection a ce niveau donnerait un classement faux/incomplet. On
+  // n'active donc la selection qu'a partir du niveau departement, et on plafonne
+  // la taille de la zone dessinee au meme ordre de grandeur.
+  const MIN_SELECT_ZOOM = 9;
+  const MAX_SELECT_KM = 130; // ~ plus grand departement francais (Gironde)
+
+  const selectBtn = document.getElementById("select-btn");
+  const rectEl = document.getElementById("select-rect");
+  const selectMsgEl = document.getElementById("select-msg");
+  const panelEl = document.getElementById("panel");
+  const panelSubEl = document.getElementById("panel-sub");
+  const panelListEl = document.getElementById("panel-list");
+
+  let selecting = false;
+  let dragStart = null;
+  let selectMsgTimer = null;
+
+  function flashSelectMsg(text) {
+    selectMsgEl.textContent = text;
+    selectMsgEl.style.display = "block";
+    clearTimeout(selectMsgTimer);
+    selectMsgTimer = setTimeout(() => { selectMsgEl.style.display = "none"; }, 3500);
+  }
+
+  function selectionAllowed() {
+    return map.getZoom() >= MIN_SELECT_ZOOM;
+  }
+
+  function updateSelectBtnState() {
+    const allowed = selectionAllowed();
+    selectBtn.classList.toggle("disabled", !allowed);
+    selectBtn.title = allowed ? "" : "Zoomez au niveau departement pour selectionner une zone";
+  }
+
+  function cancelSelecting() {
+    selecting = false;
+    dragStart = null;
+    rectEl.style.display = "none";
+    selectBtn.classList.remove("active");
+    selectBtn.textContent = "⬛ Selectionner une zone";
+    map.dragPan.enable();
+    map.getCanvas().style.cursor = "";
+  }
+
+  updateSelectBtnState();
+  map.on("zoom", () => {
+    updateSelectBtnState();
+    if (selecting && !selectionAllowed()) {
+      cancelSelecting();
+      flashSelectMsg("Zoom trop faible : selection annulee.");
+    }
+  });
+
+  selectBtn.addEventListener("click", () => {
+    if (!selecting && !selectionAllowed()) {
+      flashSelectMsg("Zoomez au niveau departement pour selectionner une zone (le filtrage a bas zoom ne montre pas toutes les cotes).");
+      return;
+    }
+    selecting = !selecting;
+    selectBtn.classList.toggle("active", selecting);
+    selectBtn.textContent = selecting ? "Glissez sur la carte..." : "⬛ Selectionner une zone";
+    map.dragPan[selecting ? "disable" : "enable"]();
+    map.getCanvas().style.cursor = selecting ? "crosshair" : "";
+  });
+
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  const canvas = map.getCanvasContainer();
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (!selecting) return;
+    dragStart = { x: e.clientX, y: e.clientY };
+    rectEl.style.left = e.clientX + "px";
+    rectEl.style.top = e.clientY + "px";
+    rectEl.style.width = "0px";
+    rectEl.style.height = "0px";
+    rectEl.style.display = "block";
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!selecting || !dragStart) return;
+    const x = Math.min(dragStart.x, e.clientX);
+    const y = Math.min(dragStart.y, e.clientY);
+    rectEl.style.left = x + "px";
+    rectEl.style.top = y + "px";
+    rectEl.style.width = Math.abs(e.clientX - dragStart.x) + "px";
+    rectEl.style.height = Math.abs(e.clientY - dragStart.y) + "px";
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (!selecting || !dragStart) return;
+    const mapRect = map.getContainer().getBoundingClientRect();
+    const p1 = [dragStart.x - mapRect.left, dragStart.y - mapRect.top];
+    const p2 = [e.clientX - mapRect.left, e.clientY - mapRect.top];
+
+    // fin du mode selection (usage "one-shot")
+    cancelSelecting();
+
+    if (Math.abs(p2[0] - p1[0]) < 4 || Math.abs(p2[1] - p1[1]) < 4) return;
+
+    const ll1 = map.unproject(p1);
+    const ll2 = map.unproject(p2);
+    const widthKm = haversineKm(ll1.lat, ll1.lng, ll1.lat, ll2.lng);
+    const heightKm = haversineKm(ll1.lat, ll1.lng, ll2.lat, ll1.lng);
+    if (widthKm > MAX_SELECT_KM || heightKm > MAX_SELECT_KM) {
+      flashSelectMsg("Zone trop grande (max ~" + MAX_SELECT_KM + " km, echelle departement). Dessinez une zone plus petite.");
+      return;
+    }
+
+    const feats = map.queryRenderedFeatures([p1, p2], { layers: ["climbs-line"] });
+    const byIdx = new Map();
+    for (const f of feats) byIdx.set(f.properties.idx, f);
+    showZonePanel(Array.from(byIdx.values()));
+  });
+
+  function showZonePanel(feats) {
+    feats.sort((a, b) => b.properties.elev_gain_m - a.properties.elev_gain_m);
+    const ids = feats.map((f) => f.properties.idx);
+    map.setFilter("climbs-zone", ["in", ["get", "idx"], ["literal", ids]]);
+    map.setPaintProperty("climbs-line", "line-opacity", ids.length
+      ? ["case", ["in", ["get", "idx"], ["literal", ids]], 0.9, 0.12]
+      : 0.85);
+
+    panelEl.style.display = "flex";
+    if (!feats.length) {
+      panelSubEl.textContent = "0 cote dans cette zone";
+      panelListEl.innerHTML = '<div id="panel-empty">Aucune cote ici. Essayez une zone plus large.</div>';
+      return;
+    }
+    const totalDplus = feats.reduce((s, f) => s + f.properties.elev_gain_m, 0);
+    panelSubEl.textContent = feats.length + " cotes · Σ D+ " + Math.round(totalDplus) + " m";
+    panelListEl.innerHTML = feats.map((f, i) => {
+      const p = f.properties;
+      return '<li data-idx="' + p.idx + '">' +
+        '<span class="rank" style="background:' + p.color + '">' + (i + 1) + "</span>" +
+        '<div><div class="name">' + p.name + "</div>" +
+        '<div class="stats">' + p.avg_grade.toFixed(1) + "% · " + p.length_m + " m · <b>+" + p.elev_gain_m + " m</b></div>" +
+        "</div></li>";
+    }).join("");
+    panelListEl.querySelectorAll("li").forEach((li, i) => {
+      li.addEventListener("click", () => selectClimb(feats[i]));
+    });
+  }
+
+  document.getElementById("panel-close").addEventListener("click", () => {
+    panelEl.style.display = "none";
+    map.setFilter("climbs-zone", ["in", ["get", "idx"], ["literal", []]]);
+    map.setPaintProperty("climbs-line", "line-opacity", 0.85);
+  });
+</script>
+</body>
+</html>

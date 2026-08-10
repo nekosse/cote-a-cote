@@ -1,0 +1,10 @@
+geopandas
+rasterio
+shapely
+folium
+numpy
+pandas
+fiona
+scipy
+osmnx
+networkx

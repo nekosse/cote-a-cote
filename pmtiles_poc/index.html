@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PMTiles POC - Cote a cote</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+<script src="https://unpkg.com/protomaps-leaflet@2.0.1/dist/protomaps-leaflet.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  #status {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.95); padding: 6px 14px; border-radius: 8px;
+    font: 13px -apple-system, sans-serif; z-index: 9999; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+</style>
+</head>
+<body>
+<div id="status">chargement pmtiles...</div>
+<div id="map"></div>
+<script>
+  const map = L.map("map").setView([47.394, 0.686], 13);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd", maxZoom: 20,
+  }).addTo(map);
+
+  const statusEl = document.getElementById("status");
+
+  const layer = protomapsL.leafletLayer({
+    url: "climbs.pmtiles",
+    paintRules: [
+      {
+        dataLayer: "climbs",
+        symbolizer: new protomapsL.LineSymbolizer({
+          color: (z, f) => f.props.color || "#e63946",
+          width: 3,
+        }),
+      },
+    ],
+    labelRules: [],
+    maxDataZoom: 11,
+  });
+  layer.addTo(map);
+
+  fetch("climbs.pmtiles", { headers: { Range: "bytes=0-16383" } }).then(r => {
+    statusEl.textContent = "pmtiles charge (requete Range: " + r.status + ") - " + (r.headers.get("content-length") || "?") + " octets recus sur ce fragment";
+  }).catch(e => { statusEl.textContent = "erreur fetch: " + e; });
+</script>
+</body>
+</html>
