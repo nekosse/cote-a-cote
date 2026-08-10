@@ -1,21 +1,19 @@
 # Côte à côte
 
-Carte interactive des côtes cyclables, calculées automatiquement à partir de
-données publiques (pas de saisie manuelle) :
-
-- **[IGN RGE ALTI 5m](https://geoservices.ign.fr/rgealti)** — modèle
-  numérique de terrain (altitude tous les 5m)
-- **[OpenStreetMap](https://www.openstreetmap.org/)** — tracé des routes,
-  pistes et chemins (`highway=*`)
+Carte interactive des côtes cyclables, calculées automatiquement à partir
+d'un export **[OpenStreetMap](https://www.openstreetmap.org/)** pré-traité
+où chaque nœud porte déjà son altitude précise (tag `ele`) — pas de saisie
+manuelle, pas de modèle numérique de terrain (MNT) à télécharger séparément.
 
 Pour chaque tronçon de route, l'algorithme calcule la pente (régression
 linéaire de l'altitude le long du tronçon, pas une simple moyenne de pentes
-instantanées, pour ne pas amplifier le bruit du MNT), regroupe les tronçons
-en pente continus en "côtes", et calcule pour chacune sa longueur, son
+instantanées, pour ne pas amplifier le bruit), regroupe les tronçons en
+pente continus en "côtes", et calcule pour chacune sa longueur, son
 dénivelé positif, sa pente moyenne et un profil altimétrique coloré par
 pente locale.
 
-Site en ligne : **https://cote-a-cote-app.web.app**
+Site en ligne : **https://cote-a-cote-app.web.app** — 313 801 côtes,
+France métropolitaine + Corse.
 
 ## Architecture
 
@@ -24,16 +22,22 @@ une fois par un pipeline Python, encodées en tuiles vectorielles
 ([PMTiles](https://protomaps.com/pmtiles)), et servies telles quelles.
 Le navigateur ne télécharge que les tuiles couvrant la zone visible (grâce
 aux requêtes HTTP Range que PMTiles utilise), donc le coût ne grandit pas
-avec la couverture géographique — c'est ce qui permet de viser toute la
-France (et au-delà) sans jamais avoir à faire tourner de serveur de calcul
-en production.
+avec la couverture géographique.
 
-Une première architecture "live" (backend qui recalcule les côtes à la
-volée sur la zone visible) a été prototypée puis abandonnée au profit de
-cette approche statique, plus simple à faire tenir à l'échelle nationale.
+Deux architectures antérieures ont été essayées puis abandonnées :
+- une architecture "live" (backend qui recalcule les côtes à la volée sur
+  la zone visible du navigateur) — trop complexe à faire tenir à l'échelle
+  nationale ;
+- un premier pipeline statique qui téléchargeait un MNT (IGN RGE ALTI 5m)
+  et interrogeait Overpass département par département — fonctionnel mais
+  fragile (timeouts Overpass, bug de géocodage Nominatim sur "Savoie",
+  Corse absente du catalogue RGE ALTI 5m) et lent (réseau + rate limiting).
+  Remplacé par le pipeline actuel une fois qu'un export PBF avec altitude
+  déjà intégrée par nœud est devenu disponible : plus de MNT à gérer, plus
+  de requêtes réseau, couverture Corse incluse.
 
 ```
-pipeline/   -> calcule les cotes (MNT + OSM -> GeoJSON), departement par departement
+pipeline/   -> calcule les cotes (PBF pretraite -> GeoJSON), tuile par tuile
 frontend/   -> carte MapLibre GL JS qui affiche les tuiles PMTiles
 firebase_deploy/ -> config + fichiers deployes sur Firebase Hosting
 ```
@@ -42,17 +46,22 @@ firebase_deploy/ -> config + fichiers deployes sur Firebase Hosting
 
 | Fichier | Rôle |
 |---|---|
-| `slope_map.py` | Bibliothèque coeur de l'algorithme (découpage en segments, calcul de pente, regroupement en côtes, profil altimétrique colore par pente, export GeoJSON). Contient aussi un CLI (`python3 slope_map.py`) qui génère une carte Folium/Leaflet autonome pour une seule zone (utile pour du debug rapide sans repasser par tout le pipeline PMTiles). |
-| `build_dem_mosaic.py` | Fusionne les dalles `.asc` d'un export RGE ALTI en un seul GeoTIFF (`build_dem_mosaic.py <tiles_glob> <out.tif>`). |
-| `fetch_osm_bbox.py` | Récupère les tronçons OSM (`highway=*`) sur l'emprise d'un GeoTIFF donné (`fetch_osm_bbox.py <dem.tif> <out.gpkg>`). Utilise l'emprise du MNT plutôt qu'un géocodage par nom — Nominatim résout par exemple "Savoie, France" vers la Haute-Savoie. |
-| `build_department.py` | Calcule les côtes pour un département à partir de son GeoPackage OSM + son GeoTIFF, écrit un GeoJSON (`build_department.py <osm.gpkg> <dem.tif> <out.geojson>`). |
-| `build_france.py` | Orchestre les trois scripts ci-dessus pour tous les départements du catalogue RGE ALTI. Télécharge, traite puis supprime immédiatement chaque MNT/export OSM intermédiaire (ne garde que le petit GeoJSON par département). Reprise automatique via `france_progress.json` (départements déjà `done` sautés) ; les erreurs sont logguées et sautées, sans bloquer le run. |
-| `merge_departments.py` | Fusionne plusieurs GeoJSON de côtes en un seul, avec des `idx` uniques (`merge_departments.py in1.geojson in2.geojson ... out.geojson`). |
-| `france_status_loop.py` | Boucle d'affichage périodique de l'avancement du run France entière (lit `france_progress.json` + `france_build.log`). |
-| `rge_alti_catalog.json` | Catalogue département → URL de téléchargement RGE ALTI (IGN). |
+| `slope_map.py` | Bibliothèque coeur de l'algorithme (découpage en segments, calcul de pente, regroupement en côtes, profil altimétrique coloré par pente, export GeoJSON). Contient aussi un CLI (`python3 slope_map.py`) qui génère une carte Folium/Leaflet autonome pour une seule zone à partir d'un MNT+GeoPackage locaux (utile pour du debug rapide sans repasser par tout le pipeline PMTiles). |
+| `build_from_pbf.py` | Pipeline principal. Lit un PBF déjà filtré aux tronçons routiers (`osmium tags-filter -o highways.pbf source.pbf w/highway`), construit un nuage de points (coordonnées + altitude déjà présente sur chaque nœud) utilisé comme source d'échantillonnage (KD-tree, remplace le MNT raster), découpe la France en tuiles géographiques (grille régulière en degrés, pas de découpage administratif), et calcule les côtes tuile par tuile via `build_segments`/`build_climbs` de `slope_map.py`, sans les modifier. Les tuiles sont indépendantes : traitées en parallèle sur plusieurs cœurs (`ProcessPoolExecutor`, démarrage `spawn` — `fork` fait planter la pile géospatiale, cf commentaire dans le fichier). Reprise automatique via `<out_dir>/tile_progress.json`. |
+| `merge_departments.py` | Fusionne plusieurs GeoJSON de côtes en un seul, avec des `idx` uniques (`merge_departments.py in1.geojson in2.geojson ... out.geojson`). Le nom date du découpage par département de l'ancien pipeline mais fonctionne pareil avec les tuiles actuelles. |
 
-Voir [RESUME.md](RESUME.md) pour l'état d'avancement du run France entière
-et la commande exacte pour le reprendre.
+Usage :
+
+```bash
+osmium tags-filter -o highways.pbf source_osrm_pretraite.pbf w/highway --overwrite
+python3 pipeline/build_from_pbf.py highways.pbf frontend/by_tile
+python3 pipeline/merge_departments.py frontend/by_tile/climbs_*.geojson frontend/climbs_france.geojson
+```
+
+Le PBF source doit avoir un tag `ele` (altitude, en mètres) sur la quasi
+totalité de ses nœuds — c'est le cas d'un export OSRM pré-traité avec
+altitude intégrée. Sans ce tag, il faut repasser par un MNT + `slope_map.py`
+directement (cf le CLI mentionné ci-dessus).
 
 ### `frontend/`
 
@@ -62,8 +71,8 @@ et la commande exacte pour le reprendre.
 | `range_server.py` | Serveur HTTP statique minimal supportant les requêtes Range, nécessaire pour tester les PMTiles en local (`http.server` standard ne les supporte pas). |
 
 Les fichiers volumineux générés dans ce dossier (`climbs_*.geojson`,
-`*.mbtiles`, `*.pmtiles`, `by_department/`) ne sont **pas** versionnés
-(voir `.gitignore`) — ils se régénèrent via le pipeline.
+`*.mbtiles`, `*.pmtiles`, `by_tile/`) ne sont **pas** versionnés (voir
+`.gitignore`) — ils se régénèrent via le pipeline.
 
 À noter : à bas niveau de zoom, `tippecanoe --drop-densest-as-needed`
 masque une partie des côtes pour respecter les limites de taille des
@@ -86,13 +95,19 @@ cd firebase_deploy && firebase deploy --only hosting:app
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-python3 pipeline/build_france.py 2>&1 | tee -a france_build.log
-python3 pipeline/merge_departments.py frontend/by_department/climbs_D*.geojson frontend/climbs_france.geojson
+osmium tags-filter -o highways.pbf <source_osrm_pretraite.pbf> w/highway --overwrite
+python3 pipeline/build_from_pbf.py highways.pbf frontend/by_tile
+python3 pipeline/merge_departments.py frontend/by_tile/climbs_*.geojson frontend/climbs_france.geojson
 
 cd frontend
 tippecanoe -o climbs_france.mbtiles -zg --extend-zooms-if-still-dropping --drop-densest-as-needed -l climbs -f climbs_france.geojson --force
 pmtiles convert climbs_france.mbtiles climbs_france.pmtiles --force
+
+cp interactive_departement.html ../firebase_deploy/public/index.html
+cp climbs_france.pmtiles ../firebase_deploy/public/
+cd ../firebase_deploy && firebase deploy --only hosting:app
 ```
 
-Nécessite en plus `7zz` (extraction des archives RGE ALTI), `tippecanoe`
-et `pmtiles` (CLI) sur le PATH.
+Nécessite en plus `osmium` (CLI, `brew install osmium-tool`), `tippecanoe`
+et `pmtiles` (CLI) sur le PATH. Sur la France entière (~14M tronçons), le
+calcul prend de l'ordre d'une heure sur une machine à 8 coeurs.

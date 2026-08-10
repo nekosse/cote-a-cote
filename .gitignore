@@ -12,13 +12,14 @@ __pycache__/
 *.geojson
 *.mbtiles
 *.pmtiles
-_work_france/
-frontend/by_department/
+*.pbf
+_work_pbf/
+frontend/by_tile/
 firebase_deploy/public/*.pmtiles
 
 # logs et etat de pipeline (regenerables)
 *.log
-france_progress.json
+tile_progress.json
 *.bak
 
 # divers

@@ -170,10 +170,10 @@
 
   let hoveredId = null;
   let selectedId = null;
-  const N_CLIMBS = 286897; // 80/102 departements traites (pipeline France en cours), calcule au build
+  const N_CLIMBS = 313801; // France + Corse, calcule depuis le PBF OSRM pretraite (elevations precalculees)
 
   map.on("load", () => {
-    statusEl.textContent = N_CLIMBS + " cotes (80/102 departements, France en cours) - survolez, cliquez, ou selectionnez une zone";
+    statusEl.textContent = N_CLIMBS + " cotes (France + Corse) - survolez, cliquez, ou selectionnez une zone";
   });
 
   map.on("mousemove", "climbs-line", (e) => {
