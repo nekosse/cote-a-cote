@@ -4,6 +4,7 @@ reutilisant l'algorithme de slope_map.py (build_segments/build_climbs) sans
 le modifier. Le MNT departemental etant beaucoup plus gros que celui de
 Tours, on le charge en float32 (pas float64) pour limiter la memoire."""
 import json
+import os
 import sys
 import time
 
@@ -12,7 +13,7 @@ import numpy as np
 import rasterio
 from scipy.ndimage import gaussian_filter
 
-sys.path.insert(0, "/Users/leo/dev/tours-slope-map")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from slope_map import (  # noqa: E402
     CORE_ROAD_TYPES,
     DEFAULT_THRESHOLDS,
@@ -22,9 +23,7 @@ from slope_map import (  # noqa: E402
     is_bike_relevant,
 )
 
-GEOM_PATH = sys.argv[1] if len(sys.argv) > 1 else "/Users/leo/dev/tours-slope-map/geom_indre_et_loire_osm.gpkg"
-DEM_PATH = sys.argv[2] if len(sys.argv) > 2 else "/Users/leo/dev/tours-slope-map/alt_indre_et_loire.tif"
-OUT_GEOJSON = sys.argv[3] if len(sys.argv) > 3 else "/Users/leo/dev/tours-slope-map/pmtiles_poc/climbs_indre_et_loire.geojson"
+GEOM_PATH, DEM_PATH, OUT_GEOJSON = sys.argv[1:4]
 
 CHUNK_LENGTH = 80.0
 SAMPLE_STEP = 15.0

@@ -34,10 +34,10 @@ import traceback
 import requests
 
 BASE = "/Users/leo/dev/tours-slope-map"
-CATALOG_PATH = f"{BASE}/rge_alti_catalog.json"
+CATALOG_PATH = f"{BASE}/pipeline/rge_alti_catalog.json"
 PROGRESS_PATH = f"{BASE}/france_progress.json"
 ERROR_LOG = f"{BASE}/france_errors.log"
-CLIMBS_DIR = f"{BASE}/pmtiles_poc/by_department"
+CLIMBS_DIR = f"{BASE}/frontend/by_department"
 WORK_DIR = f"{BASE}/_work_france"
 DELAY_BETWEEN_DEPTS = 5.0  # courtoisie envers l'API Overpass publique, partagee
 
@@ -133,20 +133,20 @@ def process_department(dept, entry):
 
     tiles_glob = os.path.dirname(asc_files[0]) + "/*.asc"
     subprocess.run(
-        [sys.executable, f"{BASE}/build_dem_mosaic.py", tiles_glob, dem_tif],
+        [sys.executable, f"{BASE}/pipeline/build_dem_mosaic.py", tiles_glob, dem_tif],
         check=True, capture_output=True,
     )
     subprocess.run(["rm", "-rf", extract_dir], check=True)
 
     print("Recuperation OSM sur l'emprise du MNT...", flush=True)
     subprocess.run(
-        [sys.executable, f"{BASE}/fetch_osm_bbox.py", dem_tif, osm_gpkg],
+        [sys.executable, f"{BASE}/pipeline/fetch_osm_bbox.py", dem_tif, osm_gpkg],
         check=True, capture_output=True, timeout=1200,
     )
 
     print("Calcul des cotes...", flush=True)
     subprocess.run(
-        [sys.executable, f"{BASE}/build_department.py", osm_gpkg, dem_tif, out_geojson],
+        [sys.executable, f"{BASE}/pipeline/build_department.py", osm_gpkg, dem_tif, out_geojson],
         check=True, capture_output=True, timeout=1800,
     )
 

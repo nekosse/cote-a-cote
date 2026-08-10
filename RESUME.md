@@ -4,7 +4,7 @@
 
 - **80/102 departements traites** (metropole + DOM-TOM inclus dans le
   catalogue RGE ALTI), **286 897 cotes** cumulees dans
-  `pmtiles_poc/by_department/*.geojson`
+  `frontend/by_department/*.geojson`
 - **9 en erreur** (timeout Overpass ou crash mosaique), a reessayer :
   `001 038 054 057 059 062 067 077 089`
   (Ain, Isere, Meurthe-et-Moselle, Moselle, Nord, Pas-de-Calais, Bas-Rhin,
@@ -22,7 +22,7 @@
 
 ```bash
 cd /Users/leo/dev/tours-slope-map && source venv/bin/activate
-python3 build_france.py 2>&1 | tee -a france_build.log
+python3 pipeline/build_france.py 2>&1 | tee -a france_build.log
 ```
 
 Le script lit `france_progress.json` et saute tout ce qui a
@@ -30,19 +30,19 @@ Le script lit `france_progress.json` et saute tout ce qui a
 (~22 departements restants, a ce rythme ~2-3h).
 
 Si on veut exclure les DOM-TOM pour l'instant, retirer les cles `971` a
-`978` de `rge_alti_catalog.json` avant de relancer (ou les ignorer dans
-`build_france.py`, `remaining = [d for d in dept_codes if not
-d.startswith('9') and ...]`).
+`978` de `pipeline/rge_alti_catalog.json` avant de relancer (ou les
+ignorer dans `pipeline/build_france.py`, `remaining = [d for d in
+dept_codes if not d.startswith('9') and ...]`).
 
 ## Pour finaliser une fois tout fait (ou pour tester avec ce qu'on a deja)
 
 ```bash
 # fusionner tous les geojson par departement en un seul fichier
-python3 merge_departments.py pmtiles_poc/by_department/climbs_D*.geojson pmtiles_poc/climbs_france.geojson
+python3 pipeline/merge_departments.py frontend/by_department/climbs_D*.geojson frontend/climbs_france.geojson
 
 # tuiles vectorielles + PMTiles
-cd pmtiles_poc
-tippecanoe -o climbs_france.mbtiles -zg --extend-zooms-if-still-dropping -l climbs -f climbs_france.geojson --force
+cd frontend
+tippecanoe -o climbs_france.mbtiles -zg --extend-zooms-if-still-dropping --drop-densest-as-needed -l climbs -f climbs_france.geojson --force
 pmtiles convert climbs_france.mbtiles climbs_france.pmtiles --force
 
 # mettre a jour interactive_departement.html : pointer vers climbs_france.pmtiles,
@@ -51,19 +51,18 @@ pmtiles convert climbs_france.mbtiles climbs_france.pmtiles --force
 # copier + deployer
 cp interactive_departement.html ../firebase_deploy/public/index.html
 cp climbs_france.pmtiles ../firebase_deploy/public/
-rm -f ../firebase_deploy/public/climbs_all.pmtiles  # ancien fichier
 cd ../firebase_deploy && firebase deploy --only hosting:app
 ```
 
 ## A savoir / pieges deja rencontres
 
 - **Nominatim resout "Savoie, France" vers la Haute-Savoie** ("Upper
-  Savoy") - c'est pour ca que `fetch_osm_bbox.py` utilise l'emprise du
-  MNT deja telecharge plutot qu'un geocodage par nom. Ne PAS revenir a
-  `ox.geocode_to_gdf(nom_departement)`.
+  Savoy") - c'est pour ca que `pipeline/fetch_osm_bbox.py` utilise
+  l'emprise du MNT deja telecharge plutot qu'un geocodage par nom. Ne PAS
+  revenir a `ox.geocode_to_gdf(nom_departement)`.
 - **Cache osmnx desactive** (`ox.settings.use_cache = False` dans
-  `fetch_osm_bbox.py`) - sinon `cache/` grossit sans limite (6+ Go vus
-  apres 25 departements).
+  `pipeline/fetch_osm_bbox.py`) - sinon `cache/` grossit sans limite (6+
+  Go vus apres 25 departements).
 - **Disque limite** (66 Go libres au debut de la journee, a verifier avant
   de relancer avec `df -h`) : chaque departement nettoie ses fichiers
   intermediaires (.7z, .asc, .tif, .gpkg) juste apres usage - ne garder

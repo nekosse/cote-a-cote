@@ -13,7 +13,7 @@ __pycache__/
 *.mbtiles
 *.pmtiles
 _work_france/
-pmtiles_poc/by_department/
+frontend/by_department/
 firebase_deploy/public/*.pmtiles
 
 # logs et etat de pipeline (regenerables)

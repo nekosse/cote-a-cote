@@ -4,8 +4,7 @@
 nomenclature du produit) : on le declare explicitement en enveloppant
 chaque dalle dans un MemoryFile avant fusion.
 
-Usage: build_dem_mosaic.py <tiles_glob> <out_path>
-(sans arguments : comportement historique, mosaique Indre-et-Loire)"""
+Usage: build_dem_mosaic.py <tiles_glob> <out_path>"""
 import glob
 import sys
 import time
@@ -14,17 +13,7 @@ import rasterio
 from rasterio.io import MemoryFile
 from rasterio.merge import merge
 
-if len(sys.argv) >= 3:
-    TILES_GLOB = sys.argv[1]
-    OUT_PATH = sys.argv[2]
-else:
-    TILES_GLOB = (
-        "/Users/leo/dev/tours-slope-map/rge_alti_d037/"
-        "RGEALTI_2-0_5M_ASC_LAMB93-IGN69_D037_2023-07-20/RGEALTI/"
-        "1_DONNEES_LIVRAISON_2023-08-00160/"
-        "RGEALTI_MNT_5M_ASC_LAMB93_IGN69_D037/*.asc"
-    )
-    OUT_PATH = "/Users/leo/dev/tours-slope-map/alt_indre_et_loire.tif"
+TILES_GLOB, OUT_PATH = sys.argv[1:3]
 CRS = "EPSG:2154"
 
 paths = sorted(glob.glob(TILES_GLOB))
