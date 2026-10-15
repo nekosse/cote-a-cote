@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PMTiles Indre-et-Loire - Cote a cote</title>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -82,6 +83,37 @@
   #panel-list .name { font-weight: 600; font-size: 12.5px; line-height: 1.25; }
   #panel-list .stats { color: #6b7280; font-size: 11px; margin-top: 1px; }
   #panel-empty { padding: 16px; font-size: 12.5px; color: #6b7280; }
+
+  /* ecrans tactiles : cibles plus grandes, pas de selection de texte parasite */
+  @media (pointer: coarse) {
+    #select-btn { padding: 12px 16px; font-size: 14px; }
+    #panel-close { font-size: 28px; padding: 4px 8px; margin: -4px -8px -4px 0; }
+    #panel-list li { padding: 12px 16px; }
+    #panel-list .rank { width: 24px; height: 24px; font-size: 11px; }
+    #panel-list .name { font-size: 14px; }
+    #panel-list .stats { font-size: 12px; }
+  }
+
+  /* telephone / petite fenetre : panneaux en "bottom sheet", barre du haut compacte */
+  @media (max-width: 640px) {
+    #status {
+      top: 8px; left: 8px; right: 140px; transform: none;
+      font-size: 11.5px; padding: 6px 10px; line-height: 1.3;
+    }
+    #select-btn { top: 8px; right: 8px; padding: 10px 12px; }
+    #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
+    #detail {
+      left: 8px; right: 8px; width: auto; box-sizing: border-box;
+      bottom: calc(8px + env(safe-area-inset-bottom));
+      padding: 12px 16px;
+    }
+    #detail .name { font-size: 16px; margin-bottom: 6px; }
+    #detail .profile { margin-top: 8px; }
+    #panel {
+      top: 52px; left: 8px; right: 8px; width: auto; max-height: 42vh;
+    }
+    .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { z-index: 1; }
+  }
 </style>
 </head>
 <body>
@@ -105,64 +137,53 @@
   const pmProtocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", pmProtocol.tile);
 
+  // Fond de plan : OpenFreeMap (gratuit, sans cle). Les tuiles raster CARTO
+  // gratuites affichent desormais un filigrane "API key required".
   const map = new maplibregl.Map({
     container: "map",
     center: [2.8, 46.4],
     zoom: 5.7,
-    style: {
-      version: 8,
-      glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
-      sources: {
-        basemap: {
-          type: "raster",
-          tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
-          tileSize: 256,
-          attribution: "&copy; OpenStreetMap &copy; CARTO",
-        },
-        climbs: {
-          type: "vector",
-          url: "pmtiles://climbs_france.pmtiles",
-          promoteId: "idx",
-        },
+    style: "https://tiles.openfreemap.org/styles/positron",
+  });
+
+  // Les couches de cotes s'ajoutent par-dessus le style du fond de plan.
+  map.on("style.load", () => {
+    map.addSource("climbs", {
+      type: "vector",
+      url: "pmtiles://climbs_france.pmtiles",
+      promoteId: "idx",
+    });
+    const lineLayout = { "line-cap": "round", "line-join": "round" };
+    map.addLayer({
+      id: "climbs-line",
+      type: "line",
+      source: "climbs",
+      "source-layer": "climbs",
+      layout: lineLayout,
+      paint: {
+        "line-color": ["get", "color"],
+        "line-width": ["case", ["boolean", ["feature-state", "hover"], false], 6, 2.5],
+        "line-opacity": 0.85,
       },
-      layers: [
-        { id: "basemap", type: "raster", source: "basemap" },
-        {
-          id: "climbs-line",
-          type: "line",
-          source: "climbs",
-          "source-layer": "climbs",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-color": ["get", "color"],
-            "line-width": [
-              "case",
-              ["boolean", ["feature-state", "hover"], false], 6,
-              2.5,
-            ],
-            "line-opacity": 0.85,
-          },
-        },
-        {
-          id: "climbs-zone",
-          type: "line",
-          source: "climbs",
-          "source-layer": "climbs",
-          layout: { "line-cap": "round", "line-join": "round" },
-          filter: ["in", ["get", "idx"], ["literal", []]],
-          paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 1 },
-        },
-        {
-          id: "climbs-halo",
-          type: "line",
-          source: "climbs",
-          "source-layer": "climbs",
-          layout: { "line-cap": "round", "line-join": "round" },
-          filter: ["==", ["get", "idx"], -1],
-          paint: { "line-color": ["get", "color"], "line-width": 13, "line-opacity": 0.32 },
-        },
-      ],
-    },
+    });
+    map.addLayer({
+      id: "climbs-zone",
+      type: "line",
+      source: "climbs",
+      "source-layer": "climbs",
+      layout: lineLayout,
+      filter: ["in", ["get", "idx"], ["literal", []]],
+      paint: { "line-color": ["get", "color"], "line-width": 5, "line-opacity": 1 },
+    });
+    map.addLayer({
+      id: "climbs-halo",
+      type: "line",
+      source: "climbs",
+      "source-layer": "climbs",
+      layout: lineLayout,
+      filter: ["==", ["get", "idx"], -1],
+      paint: { "line-color": ["get", "color"], "line-width": 13, "line-opacity": 0.32 },
+    });
   });
 
   const statusEl = document.getElementById("status");
@@ -247,7 +268,9 @@
 
     if (!opts.skipFly) {
       map.fitBounds(lineBounds(f.geometry), {
-        padding: { top: 60, right: 300, bottom: 180, left: 60 },
+        padding: window.innerWidth <= 640
+          ? { top: 70, right: 30, bottom: 240, left: 30 }
+          : { top: 60, right: 300, bottom: 180, left: 60 },
         maxZoom: 16,
         duration: 800,
       });
@@ -301,6 +324,7 @@
 
   let selecting = false;
   let dragStart = null;
+  let activePointer = null;
   let selectMsgTimer = null;
 
   function flashSelectMsg(text) {
@@ -320,14 +344,21 @@
     selectBtn.title = allowed ? "" : "Zoomez au niveau departement pour selectionner une zone";
   }
 
+  const narrow = () => window.matchMedia("(max-width: 640px)").matches;
+  const idleLabel = () => (narrow() ? "⬛ Zone" : "⬛ Selectionner une zone");
+  const activeLabel = () => (narrow() ? "Dessinez..." : "Glissez sur la carte...");
+  selectBtn.textContent = idleLabel();
+
   function cancelSelecting() {
     selecting = false;
     dragStart = null;
+    activePointer = null;
     rectEl.style.display = "none";
     selectBtn.classList.remove("active");
-    selectBtn.textContent = "⬛ Selectionner une zone";
+    selectBtn.textContent = idleLabel();
     map.dragPan.enable();
     map.getCanvas().style.cursor = "";
+    map.getCanvasContainer().style.touchAction = "";
   }
 
   updateSelectBtnState();
@@ -346,9 +377,13 @@
     }
     selecting = !selecting;
     selectBtn.classList.toggle("active", selecting);
-    selectBtn.textContent = selecting ? "Glissez sur la carte..." : "⬛ Selectionner une zone";
+    selectBtn.textContent = selecting ? activeLabel() : idleLabel();
     map.dragPan[selecting ? "disable" : "enable"]();
     map.getCanvas().style.cursor = selecting ? "crosshair" : "";
+    // sans ca le navigateur tactile garde le geste pour lui (scroll/zoom) et
+    // envoie pointercancel au lieu de nous laisser dessiner le rectangle
+    map.getCanvasContainer().style.touchAction = selecting ? "none" : "";
+    if (selecting && narrow()) flashSelectMsg("Faites glisser un doigt sur la carte pour dessiner la zone.");
   });
 
   function haversineKm(lat1, lon1, lat2, lon2) {
@@ -362,8 +397,11 @@
 
   const canvas = map.getCanvasContainer();
 
-  canvas.addEventListener("mousedown", (e) => {
-    if (!selecting) return;
+  // Pointer Events : souris, doigt et stylet passent par le meme chemin.
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!selecting || activePointer !== null) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    activePointer = e.pointerId;
     dragStart = { x: e.clientX, y: e.clientY };
     rectEl.style.left = e.clientX + "px";
     rectEl.style.top = e.clientY + "px";
@@ -372,8 +410,8 @@
     rectEl.style.display = "block";
   });
 
-  window.addEventListener("mousemove", (e) => {
-    if (!selecting || !dragStart) return;
+  window.addEventListener("pointermove", (e) => {
+    if (!selecting || !dragStart || e.pointerId !== activePointer) return;
     const x = Math.min(dragStart.x, e.clientX);
     const y = Math.min(dragStart.y, e.clientY);
     rectEl.style.left = x + "px";
@@ -382,8 +420,15 @@
     rectEl.style.height = Math.abs(e.clientY - dragStart.y) + "px";
   });
 
-  window.addEventListener("mouseup", (e) => {
-    if (!selecting || !dragStart) return;
+  window.addEventListener("pointercancel", (e) => {
+    if (selecting && e.pointerId === activePointer) {
+      cancelSelecting();
+      flashSelectMsg("Selection interrompue, reessayez.");
+    }
+  });
+
+  window.addEventListener("pointerup", (e) => {
+    if (!selecting || !dragStart || e.pointerId !== activePointer) return;
     const mapRect = map.getContainer().getBoundingClientRect();
     const p1 = [dragStart.x - mapRect.left, dragStart.y - mapRect.top];
     const p2 = [e.clientX - mapRect.left, e.clientY - mapRect.top];
@@ -391,7 +436,7 @@
     // fin du mode selection (usage "one-shot")
     cancelSelecting();
 
-    if (Math.abs(p2[0] - p1[0]) < 4 || Math.abs(p2[1] - p1[1]) < 4) return;
+    if (Math.abs(p2[0] - p1[0]) < 8 || Math.abs(p2[1] - p1[1]) < 8) return;
 
     const ll1 = map.unproject(p1);
     const ll2 = map.unproject(p2);
