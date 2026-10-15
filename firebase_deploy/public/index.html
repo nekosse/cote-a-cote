@@ -104,14 +104,25 @@
     #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
     #detail {
       left: 8px; right: 8px; width: auto; box-sizing: border-box;
-      bottom: calc(8px + env(safe-area-inset-bottom));
       padding: 12px 16px;
     }
     #detail .name { font-size: 16px; margin-bottom: 6px; }
     #detail .profile { margin-top: 8px; }
+    /* liste de la zone : bottom sheet (deux etats : ouverte / repliee sur l'en-tete) */
     #panel {
-      top: 52px; left: 8px; right: 8px; width: auto; max-height: 42vh;
+      top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 50vh;
+      border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom);
+      box-shadow: 0 -8px 30px rgba(15,23,42,0.22);
     }
+    #panel-header { position: relative; padding-top: 20px; cursor: pointer; }
+    #panel-header::before {
+      content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px;
+      margin-left: -18px; border-radius: 2px; background: #d1d5db;
+    }
+    #panel.collapsed #panel-list { display: none; }
+    #panel.collapsed #panel-header { border-bottom: none; }
+    /* la fiche d'une cote se pose juste au-dessus de la feuille */
+    #detail { bottom: calc(var(--sheet-h, 0px) + 8px + env(safe-area-inset-bottom)); }
     .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { z-index: 1; }
   }
 </style>
@@ -268,8 +279,8 @@
 
     if (!opts.skipFly) {
       map.fitBounds(lineBounds(f.geometry), {
-        padding: window.innerWidth <= 640
-          ? { top: 70, right: 30, bottom: 240, left: 30 }
+        padding: narrow()
+          ? { top: 70, right: 30, bottom: 260, left: 30 }
           : { top: 60, right: 300, bottom: 180, left: 60 },
         maxZoom: 16,
         duration: 800,
@@ -287,6 +298,9 @@
       "</div>" +
       profileSvg(p.profile, p.profile_grades, p.color);
     detailEl.classList.add("show");
+    // mobile : la fiche prend la place de la liste, qui se replie sur son en-tete
+    if (narrow() && panelEl.style.display === "flex") setPanelCollapsed(true);
+    updateSheetOffset();
   }
 
   function clearSelection() {
@@ -295,15 +309,46 @@
     selectedId = null;
   }
 
-  map.on("click", "climbs-line", (e) => {
-    if (!e.features.length) return;
-    selectClimb(e.features[0]);
-  });
+  // Les lignes font 2.5 px : impossible de les viser au doigt. On cherche donc
+  // dans un carre autour du point touche (plus large au tactile) et on garde la
+  // cote la plus proche du point.
+  function distToLinePx(point, geometry) {
+    const lines = geometry.type === "MultiLineString" ? geometry.coordinates : [geometry.coordinates];
+    let best = Infinity;
+    for (const line of lines) {
+      let prev = null;
+      for (const c of line) {
+        const q = map.project(c);
+        if (prev) {
+          const dx = q.x - prev.x, dy = q.y - prev.y;
+          const len2 = dx * dx + dy * dy;
+          let t = len2 ? ((point.x - prev.x) * dx + (point.y - prev.y) * dy) / len2 : 0;
+          t = Math.max(0, Math.min(1, t));
+          best = Math.min(best, Math.hypot(point.x - (prev.x + t * dx), point.y - (prev.y + t * dy)));
+        }
+        prev = q;
+      }
+    }
+    return best;
+  }
+
+  function climbAt(point, touch) {
+    const r = touch ? 22 : 6;
+    const feats = map.queryRenderedFeatures(
+      [[point.x - r, point.y - r], [point.x + r, point.y + r]], { layers: ["climbs-line"] });
+    let best = null, bestD = Infinity;
+    for (const f of feats) {
+      const d = distToLinePx(point, f.geometry);
+      if (d < bestD) { best = f; bestD = d; }
+    }
+    return best;
+  }
 
   map.on("click", (e) => {
     if (selecting) return;
-    const feats = map.queryRenderedFeatures(e.point, { layers: ["climbs-line"] });
-    if (feats.length === 0) clearSelection();
+    const f = climbAt(e.point, e.originalEvent && e.originalEvent.pointerType === "touch"
+      || window.matchMedia("(pointer: coarse)").matches);
+    if (f) selectClimb(f); else clearSelection();
   });
 
   // --- selection de zone (glisser un rectangle) ---
@@ -453,6 +498,28 @@
     showZonePanel(Array.from(byIdx.values()));
   });
 
+  function setPanelCollapsed(collapsed) {
+    panelEl.classList.toggle("collapsed", collapsed);
+    updateSheetOffset();
+  }
+
+  // hauteur occupee par la feuille en bas (mobile) : la fiche d'une cote se
+  // positionne au-dessus via la variable CSS --sheet-h
+  function updateSheetOffset() {
+    const open = narrow() && panelEl.style.display === "flex";
+    document.documentElement.style.setProperty("--sheet-h", open ? panelEl.offsetHeight + "px" : "0px");
+  }
+
+  // la feuille change de hauteur (contenu, repli, affichage) : on suit tout
+  // avec un ResizeObserver plutot que de penser a rappeler updateSheetOffset
+  new ResizeObserver(updateSheetOffset).observe(panelEl);
+  window.addEventListener("resize", updateSheetOffset);
+
+  document.getElementById("panel-header").addEventListener("click", (e) => {
+    if (!narrow() || e.target.id === "panel-close") return;
+    setPanelCollapsed(!panelEl.classList.contains("collapsed"));
+  });
+
   function showZonePanel(feats) {
     feats.sort((a, b) => b.properties.elev_gain_m - a.properties.elev_gain_m);
     const ids = feats.map((f) => f.properties.idx);
@@ -462,6 +529,8 @@
       : 0.85);
 
     panelEl.style.display = "flex";
+    panelEl.classList.remove("collapsed");
+    updateSheetOffset();
     if (!feats.length) {
       panelSubEl.textContent = "0 cote dans cette zone";
       panelListEl.innerHTML = '<div id="panel-empty">Aucune cote ici. Essayez une zone plus large.</div>';
@@ -484,6 +553,7 @@
 
   document.getElementById("panel-close").addEventListener("click", () => {
     panelEl.style.display = "none";
+    updateSheetOffset();
     map.setFilter("climbs-zone", ["in", ["get", "idx"], ["literal", []]]);
     map.setPaintProperty("climbs-line", "line-opacity", 0.85);
   });
