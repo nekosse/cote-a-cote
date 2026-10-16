@@ -27,6 +27,8 @@
   #detail .stats { display: flex; gap: 18px; }
   #detail .stat b { display: block; font-size: 20px; }
   #detail .stat span { font-size: 10px; color: #6b7280; text-transform: uppercase; }
+  #detail .surface { margin-top: 10px; font-size: 12px; color: #374151; line-height: 1.4; }
+  #detail .surface .label { color: #6b7280; text-transform: uppercase; font-size: 10px; margin-right: 6px; }
   #detail .profile { margin-top: 14px; }
   #detail .profile svg { width: 100%; height: 52px; display: block; }
   #detail .profile-range {
@@ -42,6 +44,25 @@
   }
   #select-btn.active { background: #2563eb; color: white; }
   #select-btn.disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* filtre global par revetement : barre de pastilles sous le bandeau du haut */
+  #chips {
+    position: fixed; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 9999; display: flex; gap: 6px; max-width: calc(100vw - 30px);
+    overflow-x: auto; scrollbar-width: none; padding: 2px 2px 6px;
+  }
+  #chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid rgba(15,23,42,0.08); border-radius: 999px;
+    background: rgba(255,255,255,0.96); color: #374151; font: inherit; font-size: 12.5px;
+    font-weight: 600; cursor: pointer; white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15); transition: background .12s, color .12s;
+  }
+  .chip:hover { background: #fff; }
+  .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.9); }
+  .chip.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .chip.on:hover { background: #1d4ed8; }
 
   #select-rect {
     position: fixed; z-index: 9998; pointer-events: none;
@@ -89,6 +110,7 @@
     #select-btn { padding: 12px 16px; font-size: 14px; }
     #panel-close { font-size: 28px; padding: 4px 8px; margin: -4px -8px -4px 0; }
     #panel-list li { padding: 12px 16px; }
+    .chip { padding: 9px 14px; font-size: 13.5px; }
     #panel-list .rank { width: 24px; height: 24px; font-size: 11px; }
     #panel-list .name { font-size: 14px; }
     #panel-list .stats { font-size: 12px; }
@@ -101,6 +123,8 @@
       font-size: 11.5px; padding: 6px 10px; line-height: 1.3;
     }
     #select-btn { top: 8px; right: 8px; padding: 10px 12px; }
+    /* pastilles sur toute la largeur, defilables horizontalement */
+    #chips { top: 70px; left: 0; right: 0; transform: none; max-width: none; padding: 2px 8px 6px; }
     #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
     #detail {
       left: 8px; right: 8px; width: auto; box-sizing: border-box;
@@ -130,6 +154,7 @@
 <body>
 <div id="status">chargement...</div>
 <button id="select-btn">&#9635; Selectionner une zone</button>
+<div id="chips" role="group" aria-label="Filtrer par revêtement"></div>
 <div id="select-rect"></div>
 <div id="select-msg"></div>
 <div id="panel">
@@ -272,6 +297,29 @@
       "</div>";
   }
 
+  // Valeurs OSM du tag surface=* -> libelle francais (valeur inconnue : affichee telle quelle)
+  const SURFACE_FR = {
+    asphalt: "Asphalte", paved: "Revêtu", concrete: "Béton", "concrete:plates": "Dalles béton",
+    "concrete:lanes": "Dalles béton", paving_stones: "Pavés plats", sett: "Pavés",
+    cobblestone: "Pavés", unhewn_cobblestone: "Pavés bruts", compacted: "Terre compactée",
+    fine_gravel: "Gravier fin", gravel: "Gravier", unpaved: "Non revêtu", dirt: "Terre",
+    ground: "Terre", earth: "Terre", grass: "Herbe", sand: "Sable", wood: "Bois", metal: "Métal",
+    rock: "Roche", pebblestone: "Galets", mud: "Boue", grass_paver: "Pavés enherbés",
+    woodchips: "Copeaux", tartan: "Tartan", clay: "Argile", bricks: "Briques",
+  };
+
+  // "asphalt:85,sett:15" -> "Asphalte 85 % · Pavés 15 %" (chaine vide : rien d'affiche)
+  function surfaceHtml(str) {
+    if (!str) return "";
+    const single = str.indexOf(",") === -1;
+    const parts = str.split(",").map((part) => {
+      const [key, pct] = part.split(":");
+      const label = SURFACE_FR[key] || key.replace(/_/g, " ");
+      return single ? label : label + " " + pct + " %";
+    });
+    return '<div class="surface"><span class="label">revêtement</span>' + parts.join(" · ") + "</div>";
+  }
+
   function selectClimb(f, opts) {
     opts = opts || {};
     selectedId = f.id;
@@ -296,6 +344,7 @@
       '<div class="stat"><b>' + p.length_m + '</b><span>longueur</span></div>' +
       '<div class="stat"><b>+' + p.elev_gain_m + '</b><span>deniv.</span></div>' +
       "</div>" +
+      surfaceHtml(p.surface) +
       profileSvg(p.profile, p.profile_grades, p.color);
     detailEl.classList.add("show");
     // mobile : la fiche prend la place de la liste, qui se replie sur son en-tete
@@ -349,6 +398,68 @@
     const f = climbAt(e.point, e.originalEvent && e.originalEvent.pointerType === "touch"
       || window.matchMedia("(pointer: coarse)").matches);
     if (f) selectClimb(f); else clearSelection();
+  });
+
+  // --- filtre global par revetement ---
+  // Barre de pastilles : aucune pastille active = pas de filtre ("Tout").
+  // Filtre sur le revetement DOMINANT de la cote (1er de la chaine
+  // "asphalt:85,sett:15"). La selection de zone passe par queryRenderedFeatures
+  // sur la couche filtree : elle ne compte donc que les cotes visibles.
+  const SURFACE_CATS = [
+    { key: "asphalt", label: "Asphalte", color: "#4b5563",
+      values: ["asphalt", "paved", "concrete", "concrete:plates", "concrete:lanes"] },
+    { key: "sett", label: "Pavés", color: "#b45309",
+      values: ["sett", "cobblestone", "paving_stones", "unhewn_cobblestone", "bricks"] },
+    { key: "gravel", label: "Gravier", color: "#a8a29e",
+      values: ["gravel", "fine_gravel", "compacted", "pebblestone"] },
+    { key: "dirt", label: "Terre", color: "#92400e",
+      values: ["unpaved", "dirt", "ground", "earth", "grass", "sand", "mud", "grass_paver", "woodchips", "clay", "rock"] },
+    { key: "other", label: "Autre", color: "#7c3aed", values: null }, // tout le reste (bois, metal...)
+    { key: "unknown", label: "Non renseigné", color: "#d1d5db", values: [""] },
+  ];
+  const chipsEl = document.getElementById("chips");
+  const activeSurfaces = new Set();
+
+  chipsEl.innerHTML =
+    '<button class="chip on" data-key="">Tout</button>' +
+    SURFACE_CATS.map((c) =>
+      '<button class="chip" data-key="' + c.key + '"><span class="dot" style="background:' + c.color + '"></span>' + c.label + "</button>").join("");
+
+  function applySurfaceFilter() {
+    chipsEl.querySelectorAll(".chip").forEach((el) => {
+      const k = el.dataset.key;
+      el.classList.toggle("on", k === "" ? activeSurfaces.size === 0 : activeSurfaces.has(k));
+    });
+    if (!map.getLayer("climbs-line")) return;
+
+    let filter = null;
+    if (activeSurfaces.size) {
+      const s = ["to-string", ["coalesce", ["get", "surface"], ""]];
+      const sep = ["index-of", ":", s];
+      const first = ["slice", s, 0, ["case", [">=", sep, 0], sep, ["length", s]]];
+      const yes = [], no = [];
+      for (const c of SURFACE_CATS) if (c.values) (activeSurfaces.has(c.key) ? yes : no).push(...c.values);
+      const expr = ["match", first];
+      if (yes.length) expr.push(yes, true);
+      if (no.length) expr.push(no, false);
+      expr.push(activeSurfaces.has("other"));
+      filter = expr;
+    }
+    map.setFilter("climbs-line", filter);
+    // la selection / la liste de zone en cours ne correspondent plus a ce qui est affiche
+    clearSelection();
+    document.getElementById("panel-close").click();
+  }
+
+  chipsEl.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    const k = chip.dataset.key;
+    if (k === "") activeSurfaces.clear();
+    else if (activeSurfaces.has(k)) activeSurfaces.delete(k);
+    else activeSurfaces.add(k);
+    if (activeSurfaces.size === SURFACE_CATS.length) activeSurfaces.clear(); // tout coche = pas de filtre
+    applySurfaceFilter();
   });
 
   // --- selection de zone (glisser un rectangle) ---

@@ -173,6 +173,8 @@ def build_segments(gdf, sample, chunk_length, sample_step, thresholds, min_lengt
 
         name = row.get("name") or ""
         highway = row.get("highway") or ""
+        surface = row.get("surface")
+        surface = surface if isinstance(surface, str) else ""
 
         if is_structure(row, bridge_names, tunnel_names):
             kind = "pont" if (row.get("bridge") == "yes" or name in bridge_names) else "tunnel"
@@ -181,6 +183,7 @@ def build_segments(gdf, sample, chunk_length, sample_step, thresholds, min_lengt
                     "geometry": geom,
                     "name": name,
                     "highway": f"{highway} ({kind})",
+                    "surface": surface,
                     "pente_pct": None,
                     "color": STRUCTURE_COLOR,
                     "bin": -1,
@@ -228,6 +231,7 @@ def build_segments(gdf, sample, chunk_length, sample_step, thresholds, min_lengt
                     "geometry": sub_line,
                     "name": name,
                     "highway": highway,
+                    "surface": surface,
                     "pente_pct": round(float(slope_pct), 1),
                     "color": color,
                     "bin": COLORS.index(color),
@@ -458,10 +462,16 @@ def _merge_connected(items, snap_tolerance, points_fn=None):
         anchor_name = max(by_name, key=lambda nm: by_name[nm]["elev_gain_m"])
         names = sorted(by_name, key=lambda nm: -by_name[nm]["length_m"])
 
+        surfaces = {}
+        for b in group:
+            for sf, ln in b.get("surfaces", {}).items():
+                surfaces[sf] = surfaces.get(sf, 0.0) + ln
+
         merged.append(
             {
                 "name": anchor_name,
                 "names": names,
+                "surfaces": surfaces,
                 "avg_grade": avg_grade,
                 "length_m": total_len,
                 "elev_gain_m": elev_gain,
@@ -714,6 +724,7 @@ def build_climbs(
                 total_len = disp_lengths.sum()
                 if total_len <= 0:
                     continue
+                surfaces = disp_lengths[display_rows["surface"] != ""].groupby(display_rows["surface"]).sum().to_dict()
                 avg_grade = (display_rows["pente_pct"] * disp_lengths).sum() / total_len
                 elev_gain = (display_rows["pente_pct"] / 100 * disp_lengths).sum()
 
@@ -734,6 +745,7 @@ def build_climbs(
                         "length_m": float(total_len),
                         "elev_gain_m": float(elev_gain),
                         "geometry": geometry,
+                        "surfaces": surfaces,
                         "connectors": connectors,
                     }
                 )
@@ -744,6 +756,7 @@ def build_climbs(
         union_wgs84 = gpd.GeoSeries([c["geometry"]], crs=segments.crs).to_crs(4326)
         b = union_wgs84.total_bounds  # minx, miny, maxx, maxy
         c["bounds"] = [[b[1], b[0]], [b[3], b[2]]]  # [[south, west], [north, east]]
+        c["surface"] = _encode_surface(c.get("surfaces", {}), c["length_m"])
         c["avg_grade"] = round(c["avg_grade"], 1)
         c["length_m"] = round(c["length_m"])
         c["elev_gain_m"] = round(c["elev_gain_m"])
@@ -755,6 +768,31 @@ def build_climbs(
     for i, c in enumerate(climbs):
         c["idx"] = i
     return climbs
+
+
+SURFACE_MIN_KNOWN_SHARE = 0.3  # en dessous, trop peu de troncons renseignes pour conclure
+SURFACE_MIN_SHARE = 0.1  # un revetement ne ressort que s'il couvre au moins 10% du renseigne
+
+
+def _encode_surface(surfaces, total_length):
+    """Revetement dominant d'une cote, en "valeur:pct,valeur:pct" (part du
+    longueur RENSEIGNEE, pas de la longueur totale : beaucoup de tronçons OSM
+    n'ont pas de tag surface, ne pas les compter evite de tout tirer vers
+    "inconnu"). Chaine vide si moins de 30% de la cote est renseignee -
+    mieux vaut ne rien afficher qu'une conclusion tiree de quelques metres.
+    Plusieurs valeurs de surface peuvent etre separees par ';' dans OSM
+    (ex: "asphalt;paving_stones") : on garde la premiere."""
+    known = {}
+    for sf, ln in surfaces.items():
+        key = sf.split(";")[0].strip().lower()
+        if key:
+            known[key] = known.get(key, 0.0) + ln
+    known_len = sum(known.values())
+    if total_length <= 0 or known_len / total_length < SURFACE_MIN_KNOWN_SHARE:
+        return ""
+    ranked = sorted(known.items(), key=lambda kv: -kv[1])
+    parts = [(k, round(100 * v / known_len)) for k, v in ranked if v / known_len >= SURFACE_MIN_SHARE]
+    return ",".join(f"{k}:{pct}" for k, pct in parts[:3])
 
 
 def _encode_profile(profile):
@@ -770,6 +808,7 @@ def climbs_to_geojson(climbs, crs, thresholds):
     gdf = gpd.GeoDataFrame(
         [{"idx": c["idx"], "name": c["name"], "avg_grade": c["avg_grade"],
           "length_m": c["length_m"], "elev_gain_m": c["elev_gain_m"],
+          "surface": c["surface"],
           "profile": _encode_profile(c["profile"]),
           "profile_grades": _encode_profile(c["profile_grades"]), "geometry": c["geometry"]}
          for c in climbs],

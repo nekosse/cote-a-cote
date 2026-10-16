@@ -73,7 +73,7 @@ MAX_SAMPLE_DIST_M = 60.0  # au-dela, aucun noeud connu proche : altitude non fia
 
 TILE_LON_SIZE = 1.0
 TILE_LAT_SIZE = 1.0
-KEEP_COLS = ["name", "highway", "bicycle", "bridge", "tunnel", "oneway", "access", "service"]
+KEEP_COLS = ["name", "highway", "bicycle", "bridge", "tunnel", "oneway", "access", "service", "surface"]
 NODE_CAPACITY_HINT = 130_000_000  # marge au-dessus des ~116.5M noeuds mesures sur le PBF filtre France
 
 os.makedirs(OUT_DIR, exist_ok=True)

@@ -12,7 +12,7 @@ pente continus en "côtes", et calcule pour chacune sa longueur, son
 dénivelé positif, sa pente moyenne et un profil altimétrique coloré par
 pente locale.
 
-Site en ligne : **https://cote-a-cote-app.web.app** — 313 801 côtes,
+Site en ligne : **https://cote-a-cote-app.web.app** — 313 790 côtes,
 France métropolitaine + Corse.
 
 ## Architecture
@@ -47,7 +47,7 @@ firebase_deploy/ -> config + fichiers deployes sur Firebase Hosting
 | Fichier | Rôle |
 |---|---|
 | `slope_map.py` | Bibliothèque coeur de l'algorithme (découpage en segments, calcul de pente, regroupement en côtes, profil altimétrique coloré par pente, export GeoJSON). Contient aussi un CLI (`python3 slope_map.py`) qui génère une carte Folium/Leaflet autonome pour une seule zone à partir d'un MNT+GeoPackage locaux (utile pour du debug rapide sans repasser par tout le pipeline PMTiles). |
-| `build_from_pbf.py` | Pipeline principal. Lit un PBF déjà filtré aux tronçons routiers (`osmium tags-filter -o highways.pbf source.pbf w/highway`), construit un nuage de points (coordonnées + altitude déjà présente sur chaque nœud) utilisé comme source d'échantillonnage (KD-tree, remplace le MNT raster), découpe la France en tuiles géographiques (grille régulière en degrés, pas de découpage administratif), et calcule les côtes tuile par tuile via `build_segments`/`build_climbs` de `slope_map.py`, sans les modifier. Les tuiles sont indépendantes : traitées en parallèle sur plusieurs cœurs (`ProcessPoolExecutor`, démarrage `spawn` — `fork` fait planter la pile géospatiale, cf commentaire dans le fichier). Reprise automatique via `<out_dir>/tile_progress.json`. |
+| `build_from_pbf.py` | Pipeline principal. Lit un PBF déjà filtré aux tronçons routiers (`osmium tags-filter -o highways.pbf source.pbf w/highway`), construit un nuage de points (coordonnées + altitude déjà présente sur chaque nœud) utilisé comme source d'échantillonnage (KD-tree, remplace le MNT raster), découpe la France en tuiles géographiques (grille régulière en degrés, pas de découpage administratif), et calcule les côtes tuile par tuile via `build_segments`/`build_climbs` de `slope_map.py` (seule la source d'altitude change par rapport à une lecture MNT ; le tag OSM `surface` est en plus propagé jusqu'à chaque côte : revêtement dominant en part de longueur renseignée, ignoré si moins de 30 % de la côte est renseignée). Les tuiles sont indépendantes : traitées en parallèle sur plusieurs cœurs (`ProcessPoolExecutor`, démarrage `spawn` — `fork` fait planter la pile géospatiale, cf commentaire dans le fichier). Reprise automatique via `<out_dir>/tile_progress.json`. |
 | `merge_departments.py` | Fusionne plusieurs GeoJSON de côtes en un seul, avec des `idx` uniques (`merge_departments.py in1.geojson in2.geojson ... out.geojson`). Le nom date du découpage par département de l'ancien pipeline mais fonctionne pareil avec les tuiles actuelles. |
 
 Usage :
@@ -67,7 +67,7 @@ directement (cf le CLI mentionné ci-dessus).
 
 | Fichier | Rôle |
 |---|---|
-| `interactive_departement.html` | Carte principale (MapLibre GL JS + PMTiles). Survol/clic sur une côte, profil altimétrique coloré par pente, sélection d'une zone par rectangle (limitée au niveau département pour rester fiable — cf le filtrage tippecanoe ci-dessous). C'est ce fichier qui est copié vers `firebase_deploy/public/index.html` au déploiement. |
+| `interactive_departement.html` | Carte principale (MapLibre GL JS + PMTiles). Survol/clic sur une côte (tap tolérant au doigt), profil altimétrique coloré par pente, revêtement, filtre global par revêtement (pastilles en haut : Asphalte, Pavés, Gravier, Terre, Autre, Non renseigné — appliqué au revêtement principal de la côte), mise en page responsive (listes en bottom sheet sur mobile), sélection d'une zone par rectangle, à la souris ou au doigt (limitée au niveau département pour rester fiable — cf le filtrage tippecanoe ci-dessous). C'est ce fichier qui est copié vers `firebase_deploy/public/index.html` au déploiement. |
 | `range_server.py` | Serveur HTTP statique minimal supportant les requêtes Range, nécessaire pour tester les PMTiles en local (`http.server` standard ne les supporte pas). |
 
 Les fichiers volumineux générés dans ce dossier (`climbs_*.geojson`,
