@@ -12,7 +12,7 @@ pente continus en "côtes", et calcule pour chacune sa longueur, son
 dénivelé positif, sa pente moyenne et un profil altimétrique coloré par
 pente locale.
 
-Site en ligne : **https://cote-a-cote-app.web.app** — 313 790 côtes,
+Site en ligne : **https://cote-a-cote-app.web.app** — 509 944 côtes,
 France métropolitaine + Corse.
 
 ## Architecture
@@ -47,8 +47,15 @@ firebase_deploy/ -> config + fichiers deployes sur Firebase Hosting
 | Fichier | Rôle |
 |---|---|
 | `slope_map.py` | Bibliothèque coeur de l'algorithme (découpage en segments, calcul de pente, regroupement en côtes, profil altimétrique coloré par pente, export GeoJSON). Contient aussi un CLI (`python3 slope_map.py`) qui génère une carte Folium/Leaflet autonome pour une seule zone à partir d'un MNT+GeoPackage locaux (utile pour du debug rapide sans repasser par tout le pipeline PMTiles). |
-| `build_from_pbf.py` | Pipeline principal. Lit un PBF déjà filtré aux tronçons routiers (`osmium tags-filter -o highways.pbf source.pbf w/highway`), construit un nuage de points (coordonnées + altitude déjà présente sur chaque nœud) utilisé comme source d'échantillonnage (KD-tree, remplace le MNT raster), découpe la France en tuiles géographiques (grille régulière en degrés, pas de découpage administratif), et calcule les côtes tuile par tuile via `build_segments`/`build_climbs` de `slope_map.py` (seule la source d'altitude change par rapport à une lecture MNT ; le tag OSM `surface` est en plus propagé jusqu'à chaque côte : revêtement dominant en part de longueur renseignée, ignoré si moins de 30 % de la côte est renseignée). Les tuiles sont indépendantes : traitées en parallèle sur plusieurs cœurs (`ProcessPoolExecutor`, démarrage `spawn` — `fork` fait planter la pile géospatiale, cf commentaire dans le fichier). Reprise automatique via `<out_dir>/tile_progress.json`. |
+| `build_from_pbf.py` | Pipeline principal. Lit un PBF déjà filtré aux tronçons routiers (`osmium tags-filter -o highways.pbf source.pbf w/highway`), lit tous les nœuds (coordonnées + altitude déjà présente), puis écrit les tronçons « compatibles vélo » dans un fichier par tuile géographique (grille régulière d'1° × 1°, pas de découpage administratif), **avec l'altitude de chacun de leurs sommets**. Chaque tuile est ensuite traitée indépendamment : l'altitude est échantillonnée par un KD-tree *local à la tuile* (plus aucun index global de 116 M de nœuds à recharger par processus, c'était ce qui saturait la RAM), puis `build_segments` / `build_climbs` de `slope_map.py` calculent les côtes. Les tuiles sont traitées en parallèle (`ProcessPoolExecutor`, démarrage `spawn` — `fork` fait planter la pile géospatiale ; 4 processus, ~1-2 Go chacun). Reprise automatique via `<out_dir>/tile_progress.json`. **Les tronçons sans nom sont inclus par défaut** (`--named-only` pour les exclure). |
 | `merge_departments.py` | Fusionne plusieurs GeoJSON de côtes en un seul, avec des `idx` uniques (`merge_departments.py in1.geojson in2.geojson ... out.geojson`). Le nom date du découpage par département de l'ancien pipeline mais fonctionne pareil avec les tuiles actuelles. |
+
+**Côtes et revêtement — règles**
+
+- *Rues nommées* : regroupées par nom de rue et continuité, voies parallèles dédoublonnées, replats de raccord comptés dans les stats.
+- *Tronçons sans nom* (pistes, sentiers, voies de service…) : chaînés en « brins » de bout en bout (on coupe aux carrefours), les portions en pente séparées de moins de 60 m forment une même côte, les fragments de moins de 150 m sont écartés. Nommés « Piste sans nom », « Sentier sans nom », etc.
+- *Revêtement* : le tag OSM `surface` est propagé jusqu'à la côte (part de longueur par revêtement). Quand il manque, un revêtement **probable** est déduit du type de voie (routes → asphalte ; `track` selon `tracktype`, sinon terre ; `path` / `bridleway` → terre ; voies de service et `footway` non devinés) et marqué `~` dans les données, « (probable) » dans la fiche. Rien n'est affiché si moins de 30 % de la côte est renseignée ou déduite.
+- Les `footway` sans `bicycle=yes`/`designated` restent exclus du calcul.
 
 Usage :
 
@@ -112,4 +119,4 @@ cd ../firebase_deploy && firebase deploy --only hosting:app
 
 Nécessite en plus `osmium` (CLI, `brew install osmium-tool`), `tippecanoe`
 et `pmtiles` (CLI) sur le PATH. Sur la France entière (~14M tronçons), le
-calcul prend de l'ordre d'une heure sur une machine à 8 coeurs.
+calcul prend de l'ordre de 3 heures sur une machine à 8 cœurs / 16 Go (dont ~8 min pour écrire les tuiles). Pour interrompre un run, tuer aussi les processus `multiprocessing.spawn` (`pkill -f multiprocessing.spawn`), sinon ils restent en vie en orphelins avec leur mémoire.

@@ -147,6 +147,28 @@ def slope_bin(pct, thresholds):
     return len(COLORS) - 1
 
 
+# Revetement PROBABLE quand le tag surface=* manque (~74% des troncons velo OSM) :
+# deduit du type de voie. Prefixe par "~" pour ne jamais le confondre avec un
+# revetement renseigne. Volontairement prudent : service/footway/pedestrian ne
+# sont pas devines (trop variables : parking, allee gravillonnee, sentier de parc...).
+PAVED_HIGHWAYS = {
+    "motorway", "trunk", "primary", "primary_link", "secondary", "secondary_link",
+    "tertiary", "tertiary_link", "residential", "living_street", "unclassified", "cycleway",
+}
+# tracktype OSM : grade1 = solide (souvent revetu/stabilise) ... grade5 = mou (terre, herbe)
+TRACKTYPE_SURFACE = {"grade1": "compacted", "grade2": "gravel", "grade3": "unpaved", "grade4": "ground", "grade5": "ground"}
+
+
+def infer_surface(highway, tracktype):
+    if highway in PAVED_HIGHWAYS:
+        return "~asphalt"
+    if highway == "track":
+        return "~" + TRACKTYPE_SURFACE.get(tracktype, "unpaved")
+    if highway in ("path", "bridleway"):
+        return "~unpaved"
+    return ""
+
+
 def is_structure(row, bridge_names, tunnel_names):
     name = row.get("name")
     if row.get("bridge") == "yes" or (name and name in bridge_names):
@@ -171,10 +193,16 @@ def build_segments(gdf, sample, chunk_length, sample_step, thresholds, min_lengt
         if length < min_length:
             continue
 
-        name = row.get("name") or ""
-        highway = row.get("highway") or ""
+        # un nom absent arrive en NaN (float, donc "vrai" en Python) depuis un
+        # GeoDataFrame : `or ""` ne suffit pas, on exige explicitement une chaine
+        name = row.get("name")
+        name = name if isinstance(name, str) else ""
+        highway = row.get("highway")
+        highway = highway if isinstance(highway, str) else ""
         surface = row.get("surface")
-        surface = surface if isinstance(surface, str) else ""
+        if not isinstance(surface, str) or not surface.strip():
+            tracktype = row.get("tracktype")
+            surface = infer_surface(highway, tracktype if isinstance(tracktype, str) else "")
 
         if is_structure(row, bridge_names, tunnel_names):
             kind = "pont" if (row.get("bridge") == "yes" or name in bridge_names) else "tunnel"
@@ -455,11 +483,16 @@ def _merge_connected(items, snap_tolerance, points_fn=None):
         avg_grade = sum(b["avg_grade"] * b["length_m"] for b in group) / total_len
 
         by_name = {}
+        generic = set()
         for b in group:
             e = by_name.setdefault(b["name"], {"length_m": 0.0, "elev_gain_m": 0.0})
             e["length_m"] += b["length_m"]
             e["elev_gain_m"] += b["elev_gain_m"]
-        anchor_name = max(by_name, key=lambda nm: by_name[nm]["elev_gain_m"])
+            if b.get("generic_name"):
+                generic.add(b["name"])
+        # un nom generique ("Piste sans nom") ne l'emporte que s'il n'y a aucun vrai nom
+        real = [nm for nm in by_name if nm not in generic]
+        anchor_name = max(real or by_name, key=lambda nm: by_name[nm]["elev_gain_m"])
         names = sorted(by_name, key=lambda nm: -by_name[nm]["length_m"])
 
         surfaces = {}
@@ -637,6 +670,7 @@ def _elevation_profile(geometry, sample, thresholds, n_points=20):
 def build_climbs(
     segments, min_grade, sample, thresholds=None, dedup_buffer=15.0, snap_tolerance=2.0,
     visual_gap_bridge=60.0, name_cluster_distance=250.0, climb_gap_distance=200.0,
+    include_unnamed=False,
 ):
     """Pour chaque nom de rue : filtre les types "chaussee" preferes, puis
     deduplique les brins paralleles (_dedup_parallel) sur TOUS les troncons
@@ -690,7 +724,7 @@ def build_climbs(
     if thresholds is None:
         thresholds = DEFAULT_THRESHOLDS
     named = segments[(segments["name"] != "") & segments["pente_pct"].notna()]
-    if named.empty:
+    if named.empty and not include_unnamed:
         return []
 
     name_climbs = []
@@ -750,6 +784,9 @@ def build_climbs(
                     }
                 )
 
+    if include_unnamed:
+        name_climbs.extend(_unnamed_climbs(segments, min_grade, sample, dedup_buffer, snap_tolerance, visual_gap_bridge))
+
     climbs = _merge_connected(name_climbs, snap_tolerance, points_fn=lambda it: it["connectors"])
 
     for c in climbs:
@@ -770,6 +807,73 @@ def build_climbs(
     return climbs
 
 
+UNNAMED_LABELS = {
+    "track": "Piste", "path": "Sentier", "footway": "Chemin piéton", "cycleway": "Piste cyclable",
+    "service": "Voie de service", "bridleway": "Chemin cavalier", "living_street": "Rue sans nom",
+}
+
+
+UNNAMED_GAP_DISTANCE = 60.0  # un replat plus court que ca ne coupe pas une cote sans nom
+UNNAMED_MIN_LENGTH = 150.0  # en dessous, simple fragment de piste/sentier, pas une cote
+
+
+def _unnamed_climbs(segments, min_grade, sample, dedup_buffer, snap_tolerance, visual_gap_bridge):
+    """Cotes sur des troncons SANS nom (pistes, sentiers, voies de service...) :
+    sans nom on ne peut pas regrouper par rue, donc on regroupe par continuite.
+
+    1. Les troncons sans nom sont chaines en "brins" (_connected_runs avec
+       restrict_branching : on ne chaine qu'aux jonctions a exactement deux
+       troncons, un carrefour ou un embranchement coupe), TOUTES pentes
+       confondues : un sentier de montagne qui alterne replats et raidillons
+       reste un seul brin.
+    2. Dans un brin, les portions en pente separees par moins de
+       UNNAMED_GAP_DISTANCE forment une meme cote (sinon un sentier qui
+       ondule donnait des dizaines de cotes de ~70 m, cf essai sur les
+       Pyrenees : 20 000 "cotes" sans nom pour une seule tuile).
+    3. Les stats incluent les replats de raccord, comme pour les rues nommees.
+    4. En dessous de UNNAMED_MIN_LENGTH, un fragment est ecarte.
+    Pas de deduplication de brins paralleles : sans nom, rien ne dit que deux
+    troncons proches sont la meme voie."""
+    unnamed = segments[(segments["name"] == "") & segments["pente_pct"].notna()]
+    items = []
+    if unnamed.empty or not (unnamed["pente_pct"] >= min_grade).any():
+        return items
+    for strand_rows in _connected_runs(unnamed, snap_tolerance, restrict_branching=True):
+        strand = gpd.GeoDataFrame(strand_rows, crs=unnamed.crs)
+        climbing = strand[strand["pente_pct"] >= min_grade]
+        if climbing.empty:
+            continue
+        for climb_rows in _connected_runs(climbing, UNNAMED_GAP_DISTANCE, restrict_branching=False):
+            climb = gpd.GeoDataFrame(climb_rows, crs=climbing.crs)
+            reach = climb.geometry.union_all().buffer(UNNAMED_GAP_DISTANCE)
+            run = strand[strand.geometry.intersects(reach)]
+            lengths = run.geometry.length
+            total_len = lengths.sum()
+            if total_len < UNNAMED_MIN_LENGTH:
+                continue
+            avg_grade = (run["pente_pct"] * lengths).sum() / total_len
+            elev_gain = (run["pente_pct"] / 100 * lengths).sum()
+            surfaces = lengths[run["surface"] != ""].groupby(run["surface"]).sum().to_dict()
+            by_hw = lengths.groupby(run["highway"]).sum()
+            label = UNNAMED_LABELS.get(by_hw.idxmax(), "Route sans nom") if len(by_hw) else "Route sans nom"
+            if not label.endswith("sans nom"):
+                label += " sans nom"
+
+            geoms = list(run.geometry)
+            geometry = linemerge(geoms) if len(geoms) > 1 else geoms[0]
+            geometry = _bridge_gaps(geometry, visual_gap_bridge)
+            geometry = _trunk_path(geometry, sample)
+            runs = _connected_runs(climb, snap_tolerance)
+            longest = [r.geometry for r in max(runs, key=lambda rr: sum(g.geometry.length for g in rr))]
+            longest_geom = linemerge(longest) if len(longest) > 1 else longest[0]
+            items.append({
+                "name": label, "generic_name": True,
+                "avg_grade": float(avg_grade), "length_m": float(total_len), "elev_gain_m": float(elev_gain),
+                "geometry": geometry, "surfaces": surfaces, "connectors": _endpoints(longest_geom)[:2],
+            })
+    return items
+
+
 SURFACE_MIN_KNOWN_SHARE = 0.3  # en dessous, trop peu de troncons renseignes pour conclure
 SURFACE_MIN_SHARE = 0.1  # un revetement ne ressort que s'il couvre au moins 10% du renseigne
 
@@ -782,11 +886,22 @@ def _encode_surface(surfaces, total_length):
     mieux vaut ne rien afficher qu'une conclusion tiree de quelques metres.
     Plusieurs valeurs de surface peuvent etre separees par ';' dans OSM
     (ex: "asphalt;paving_stones") : on garde la premiere."""
-    known = {}
+    observed, inferred = {}, {}
     for sf, ln in surfaces.items():
         key = sf.split(";")[0].strip().lower()
-        if key:
-            known[key] = known.get(key, 0.0) + ln
+        if not key:
+            continue
+        guess = key.startswith("~")
+        base = key.lstrip("~")
+        bucket = inferred if guess else observed
+        bucket[base] = bucket.get(base, 0.0) + ln
+    # un meme revetement renseigne sur certains troncons et deduit sur d'autres
+    # reste un seul revetement ; il n'est marque "probable" (~) que si la
+    # majorite de sa longueur est deduite
+    known = {}
+    for base in set(observed) | set(inferred):
+        total = observed.get(base, 0.0) + inferred.get(base, 0.0)
+        known[("~" if inferred.get(base, 0.0) > observed.get(base, 0.0) else "") + base] = total
     known_len = sum(known.values())
     if total_length <= 0 or known_len / total_length < SURFACE_MIN_KNOWN_SHARE:
         return ""

@@ -186,7 +186,7 @@
   map.on("style.load", () => {
     map.addSource("climbs", {
       type: "vector",
-      url: "pmtiles://climbs_france_2026-10-16.pmtiles",
+      url: "pmtiles://climbs_france_2026-10-16b.pmtiles",
       promoteId: "idx",
     });
     const lineLayout = { "line-cap": "round", "line-join": "round" };
@@ -308,13 +308,15 @@
     woodchips: "Copeaux", tartan: "Tartan", clay: "Argile", bricks: "Briques",
   };
 
-  // "asphalt:85,sett:15" -> "Asphalte 85 % · Pavés 15 %" (chaine vide : rien d'affiche)
+  // "asphalt:85,~sett:15" -> "Asphalte 85 % · Pavés (probable) 15 %" (chaine vide : rien d'affiche)
   function surfaceHtml(str) {
     if (!str) return "";
     const single = str.indexOf(",") === -1;
     const parts = str.split(",").map((part) => {
-      const [key, pct] = part.split(":");
-      const label = SURFACE_FR[key] || key.replace(/_/g, " ");
+      const [rawKey, pct] = part.split(":");
+      const guessed = rawKey.charAt(0) === "~"; // deduit du type de voie, pas renseigne dans OSM
+      const key = guessed ? rawKey.slice(1) : rawKey;
+      const label = (SURFACE_FR[key] || key.replace(/_/g, " ")) + (guessed ? " (probable)" : "");
       return single ? label : label + " " + pct + " %";
     });
     return '<div class="surface"><span class="label">revêtement</span>' + parts.join(" · ") + "</div>";
@@ -436,7 +438,9 @@
     if (activeSurfaces.size) {
       const s = ["to-string", ["coalesce", ["get", "surface"], ""]];
       const sep = ["index-of", ":", s];
-      const first = ["slice", s, 0, ["case", [">=", sep, 0], sep, ["length", s]]];
+      // revetement dominant = 1er jeton ; le "~" de tete (revetement probable) ne compte pas
+      const start = ["case", ["==", ["slice", s, 0, 1], "~"], 1, 0];
+      const first = ["slice", s, start, ["case", [">=", sep, 0], sep, ["length", s]]];
       const yes = [], no = [];
       for (const c of SURFACE_CATS) if (c.values) (activeSurfaces.has(c.key) ? yes : no).push(...c.values);
       const expr = ["match", first];

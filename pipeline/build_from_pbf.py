@@ -28,13 +28,14 @@ Strategie (deux passes sur le PBF, une seule fois pour toute la France) :
 
 Puis, tuile par tuile (comme avant, une tuile par departement), on relit son
 .jsonl et on rappelle build_segments/build_climbs de slope_map.py SANS LES
-MODIFIER - seule la source d'altitude change (KD-tree au lieu de raster).
+MODIFIER - seule la source d'altitude change (altitude des sommets OSM, via un
+KD-tree local a chaque tuile, au lieu d'un raster).
 
 Reprise : si les .jsonl par tuile existent deja (passes 1/2 terminees), elles
 sont sautees ; `tile_progress.json` marque chaque tuile "done" pour sauter le
 calcul des cotes deja fait au prochain lancement.
 
-Usage: build_from_pbf.py <highways.pbf> <out_dir>
+Usage: build_from_pbf.py <highways.pbf> <out_dir> [--named-only]
 (le PBF doit deja etre filtre aux ways avec highway=* + noeuds references,
  ex: osmium tags-filter -o highways.pbf source.pbf w/highway)
 """
@@ -62,8 +63,10 @@ from slope_map import (  # noqa: E402
 )
 
 PBF_PATH, OUT_DIR = sys.argv[1:3]
+INCLUDE_UNNAMED = "--named-only" not in sys.argv[3:]  # par defaut detecte aussi les cotes sur troncons sans nom
 TILES_DIR = os.path.join(OUT_DIR, "_tiles_jsonl")
 PROGRESS_PATH = os.path.join(OUT_DIR, "tile_progress.json")
+TILES_DONE_MARKER = os.path.join(TILES_DIR, "_complete")
 
 CHUNK_LENGTH = 80.0
 SAMPLE_STEP = 15.0
@@ -73,7 +76,7 @@ MAX_SAMPLE_DIST_M = 60.0  # au-dela, aucun noeud connu proche : altitude non fia
 
 TILE_LON_SIZE = 1.0
 TILE_LAT_SIZE = 1.0
-KEEP_COLS = ["name", "highway", "bicycle", "bridge", "tunnel", "oneway", "access", "service", "surface"]
+KEEP_COLS = ["name", "highway", "bicycle", "bridge", "tunnel", "oneway", "access", "service", "surface", "tracktype"]
 NODE_CAPACITY_HINT = 130_000_000  # marge au-dessus des ~116.5M noeuds mesures sur le PBF filtre France
 
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -122,8 +125,9 @@ class WayWriter(osmium.SimpleHandler):
     tableaux noeuds deja en memoire) et ecrite dans le .jsonl de sa tuile -
     jamais accumules en memoire pour toute la France."""
 
-    def __init__(self, node_ids, node_x, node_y, node_lons, node_lats, tiles_dir):
+    def __init__(self, node_ids, node_x, node_y, node_lons, node_lats, node_eles, tiles_dir):
         super().__init__()
+        self.node_eles = node_eles
         self.node_ids = node_ids
         self.node_x = node_x
         self.node_y = node_y
@@ -167,6 +171,9 @@ class WayWriter(osmium.SimpleHandler):
         rec = {
             "osmid": str(w.id),
             "coords": list(zip(self.node_x[idx].tolist(), self.node_y[idx].tolist())),
+            # altitude de chaque sommet : chaque tuile s'echantillonne ainsi
+            # elle-meme (cf process_tile), sans index global a recharger
+            "ele": [round(float(z), 1) for z in self.node_eles[idx]],
         }
         for k in KEEP_COLS:
             v = w.tags.get(k)
@@ -190,8 +197,9 @@ def save_progress(progress):
     json.dump(progress, open(PROGRESS_PATH, "w"), indent=1)
 
 
-def process_tile(jsonl_path, sample):
+def process_tile(jsonl_path):
     rows = []
+    xs_all, ys_all, zs_all = [], [], []
     with open(jsonl_path, encoding="utf-8") as f:
         for line in f:
             rec = json.loads(line)
@@ -199,9 +207,29 @@ def process_tile(jsonl_path, sample):
             row["osmid"] = rec["osmid"]
             row["geometry"] = LineString(rec["coords"])
             rows.append(row)
+            for (x, y), z in zip(rec["coords"], rec["ele"]):
+                xs_all.append(x)
+                ys_all.append(y)
+                zs_all.append(z)
+
+    # KD-tree LOCAL a la tuile : les points d'echantillonnage sont toujours le
+    # long des troncons de la tuile, leur sommet le plus proche est un sommet
+    # de la tuile. Evite de charger l'altitude des ~116M noeuds de la France
+    # dans chaque processus (plusieurs Go par processus : la machine -16 Go-
+    # partait en swap, cf essai precedent).
+    tree = cKDTree(np.column_stack([xs_all, ys_all]))
+    eles = np.asarray(zs_all, dtype=np.float32)
+
+    def sample(xs, ys):
+        dist, idx = tree.query(np.column_stack([xs, ys]), k=1, workers=1)
+        z = eles[idx].astype(float)
+        z[dist > MAX_SAMPLE_DIST_M] = np.nan
+        return z
+
     gdf = gpd.GeoDataFrame(rows, crs="EPSG:2154")
     segments = build_segments(gdf, sample, CHUNK_LENGTH, SAMPLE_STEP, DEFAULT_THRESHOLDS, MIN_LENGTH)
-    climbs = build_climbs(segments, DEFAULT_THRESHOLDS[0], sample, thresholds=DEFAULT_THRESHOLDS, snap_tolerance=2.0)
+    climbs = build_climbs(segments, DEFAULT_THRESHOLDS[0], sample, thresholds=DEFAULT_THRESHOLDS, snap_tolerance=2.0,
+                          include_unnamed=INCLUDE_UNNAMED)
     climbs = [c for c in climbs if c["elev_gain_m"] > CLIMB_MIN_ELEV_GAIN]
     geojson = json.loads(climbs_to_geojson(climbs, gdf.crs, DEFAULT_THRESHOLDS)) if climbs else {
         "type": "FeatureCollection", "features": []
@@ -209,87 +237,11 @@ def process_tile(jsonl_path, sample):
     return len(rows), len(climbs), geojson
 
 
-# Construites une fois par processus par _init_worker (methode de demarrage
-# "spawn", pas "fork" - cf note dans _init_worker).
-_TREE = None
-_NODE_ELES = None
-
-
-class _EleCollector(osmium.SimpleHandler):
-    """Comme NodeCollector, mais sans les ids : chaque processus n'a besoin
-    ici que de coordonnees+altitude pour interroger le KD-tree, pas de faire
-    de lookup par id (ca, c'est uniquement necessaire une fois, cote parent,
-    pour construire la geometrie des troncons)."""
-
-    def __init__(self, capacity):
-        super().__init__()
-        self.lons = np.empty(capacity, dtype=np.float32)
-        self.lats = np.empty(capacity, dtype=np.float32)
-        self.eles = np.empty(capacity, dtype=np.float32)
-        self.n = 0
-
-    def _grow(self):
-        cap = len(self.lons) * 2
-        for attr in ("lons", "lats", "eles"):
-            arr = np.empty(cap, dtype=np.float32)
-            arr[: self.n] = getattr(self, attr)[: self.n]
-            setattr(self, attr, arr)
-
-    def node(self, n):
-        ele = n.tags.get("ele")
-        if ele is None:
-            return
-        try:
-            e = float(ele)
-        except ValueError:
-            return
-        if self.n >= len(self.lons):
-            self._grow()
-        i = self.n
-        self.lons[i] = n.location.lon
-        self.lats[i] = n.location.lat
-        self.eles[i] = e
-        self.n += 1
-
-
-def _init_worker(pbf_path):
-    """Execute une fois au demarrage de chaque processus du pool : reconstruit
-    localement le KD-tree d'altitude. On utilise la methode de demarrage
-    "spawn" (processus Python neuf, pas un fork() du parent) - un premier
-    essai avec fork() plantait les processus enfants (BrokenProcessPool),
-    tres probablement les bibliotheques C de la pile geospatiale (PROJ/GEOS
-    via pyproj/shapely) et/ou les threads BLAS de numpy/scipy ne survivent
-    pas a un fork() une fois deja inities dans le parent - un probleme connu
-    de cet ecosysteme, raison pour laquelle macOS utilise "spawn" par defaut
-    (on l'avait explicitement force a "fork" pour beneficier du
-    copy-on-write, ce qui a reintroduit exactement ce probleme).
-    Chaque worker relit donc les noeuds du PBF pour son propre KD-tree -
-    redondant avec la passe faite dans le process principal, mais rapide
-    (quelques minutes) et fait une seule fois au demarrage du pool, pas par
-    tuile."""
-    global _TREE, _NODE_ELES
-    ec = _EleCollector(NODE_CAPACITY_HINT)
-    ec.apply_file(pbf_path)
-    lons, lats, eles = ec.lons[: ec.n], ec.lats[: ec.n], ec.eles[: ec.n]
-    tr = Transformer.from_crs("EPSG:4326", "EPSG:2154", always_xy=True)
-    x, y = tr.transform(lons, lats)
-    _TREE = cKDTree(np.column_stack([x.astype(np.float32), y.astype(np.float32)]))
-    _NODE_ELES = eles
-
-
-def _sample_global(xs, ys):
-    pts = np.column_stack([xs, ys])
-    dist, idx = _TREE.query(pts, k=1, workers=1)
-    z = _NODE_ELES[idx].astype(float)
-    z[dist > MAX_SAMPLE_DIST_M] = np.nan
-    return z
-
-
 def _process_tile_worker(fname):
     tile_name = fname[: -len(".jsonl")]
     t5 = time.time()
     try:
-        n_ways, n_climbs, geojson = process_tile(os.path.join(TILES_DIR, fname), _sample_global)
+        n_ways, n_climbs, geojson = process_tile(os.path.join(TILES_DIR, fname))
         out_path = os.path.join(OUT_DIR, f"climbs_{tile_name}.geojson")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(geojson, f)
@@ -298,9 +250,10 @@ def _process_tile_worker(fname):
         return tile_name, "error", 0, 0, str(e), time.time() - t5
 
 
-def main():
+def write_tiles():
+    """Passes 1 et 2 : noeuds -> tableaux numpy, troncons -> un .jsonl par
+    tuile (geometrie + altitude de chaque sommet). Memoire liberee ensuite."""
     t0 = time.time()
-
     print("Lecture des noeuds (avec altitude)...", flush=True)
     nc = NodeCollector(NODE_CAPACITY_HINT)
     nc.apply_file(PBF_PATH)
@@ -320,34 +273,41 @@ def main():
     node_y = node_y.astype(np.float32)
     print(f"  fait en {time.time()-t1:.0f}s", flush=True)
 
-    tiles_already_built = any(f.endswith(".jsonl") for f in os.listdir(TILES_DIR))
-    if not tiles_already_built:
-        print("Lecture + ecriture des troncons par tuile...", flush=True)
-        t3 = time.time()
-        ww = WayWriter(node_ids, node_x, node_y, node_lons, node_lats, TILES_DIR)
-        ww.apply_file(PBF_PATH)
-        ww.close()
-        print(f"  {ww.n_kept}/{ww.n_seen} troncons bike-relevant ({ww.n_dropped} ecartes, noeud manquant) "
-              f"en {len(ww.handles)} tuiles, {time.time()-t3:.0f}s", flush=True)
-        del ww
-    else:
-        print("Tuiles .jsonl deja presentes - ecriture sautee (reprise).", flush=True)
+    print("Lecture + ecriture des troncons par tuile...", flush=True)
+    t3 = time.time()
+    ww = WayWriter(node_ids, node_x, node_y, node_lons, node_lats, node_eles, TILES_DIR)
+    ww.apply_file(PBF_PATH)
+    ww.close()
+    print(f"  {ww.n_kept}/{ww.n_seen} troncons bike-relevant ({ww.n_dropped} ecartes, noeud manquant) "
+          f"en {len(ww.handles)} tuiles, {time.time()-t3:.0f}s", flush=True)
+    open(TILES_DONE_MARKER, "w").close()
 
-    del node_ids, node_lons, node_lats, node_x, node_y, node_eles
+
+def main():
+    t0 = time.time()
+
+    # Les .jsonl ne sont reutilises que si la passe d'ecriture est allee au bout
+    # (marqueur) : un fichier partiel d'un run interrompu fausserait les cotes.
+    if os.path.exists(TILES_DONE_MARKER):
+        print("Tuiles .jsonl deja presentes - ecriture sautee (reprise).", flush=True)
+    else:
+        for f in os.listdir(TILES_DIR):
+            os.remove(os.path.join(TILES_DIR, f))
+        write_tiles()
 
     progress = load_progress()
     tile_files = sorted(f for f in os.listdir(TILES_DIR) if f.endswith(".jsonl"))
     pending = [f for f in tile_files if progress.get(f[: -len(".jsonl")], {}).get("status") != "done"]
+    # les plus grosses tuiles d'abord : meilleur equilibrage entre processus
+    pending.sort(key=lambda f: -os.path.getsize(os.path.join(TILES_DIR, f)))
     print(f"\n{len(tile_files)} tuiles au total, {len(pending)} a traiter", flush=True)
 
-    # Tuiles independantes -> traitees en parallele. Chaque worker reconstruit
-    # son propre KD-tree au demarrage (cf _init_worker) ; on limite le nombre
-    # de workers pour ne pas multiplier une structure de plusieurs Go par
-    # worker au point de saturer la RAM (16 Go sur cette machine).
+    # Tuiles independantes -> traitees en parallele ("spawn", pas "fork" : cf
+    # note en tete de fichier). Chaque processus ne charge que sa tuile.
     n_workers = min(4, max(1, (os.cpu_count() or 4) - 1))
-    print(f"Traitement sur {n_workers} processus en parallele (spawn, chacun reconstruit son KD-tree)...", flush=True)
+    print(f"Traitement sur {n_workers} processus en parallele (spawn)...", flush=True)
     ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx, initializer=_init_worker, initargs=(PBF_PATH,)) as ex:
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
         futures = {ex.submit(_process_tile_worker, f): f for f in pending}
         for i, fut in enumerate(as_completed(futures)):
             tile_name, status, n_ways, n_climbs, err, dt = fut.result()
