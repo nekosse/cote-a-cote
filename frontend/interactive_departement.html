@@ -68,7 +68,7 @@
 
   /* selecteur de fond de plan a la Google Maps : vignette de l'AUTRE vue, en bas a gauche */
   #basemap-btn {
-    position: fixed; left: 15px; bottom: calc(56px + var(--sheet-h, 0px)); z-index: 9998;
+    position: fixed; left: 15px; bottom: 56px; z-index: 9998;
     width: 64px; height: 64px; padding: 0; border: 2px solid #fff; border-radius: 12px;
     overflow: hidden; cursor: pointer; background: #e5e7eb center / cover no-repeat;
     box-shadow: 0 2px 8px rgba(0,0,0,.35); font-family: inherit;
@@ -168,9 +168,12 @@
     }
     #tools { top: 8px; right: 8px; gap: 6px; }
     #select-btn { padding: 10px 12px; }
-    /* telephone : vignette plus petite, et masquee quand une fiche / la liste de zone occupe le bas */
-    #basemap-btn { left: 8px; bottom: calc(12px + env(safe-area-inset-bottom)); width: 54px; height: 54px; }
-    body.has-detail #basemap-btn, body.has-sheet #basemap-btn { display: none; }
+    /* telephone : vignette plus petite, posee AU-DESSUS de la fiche / de la liste de zone
+       (--stack-h = hauteur de cette pile, mise a jour par updateSheetOffset) */
+    #basemap-btn {
+      left: 8px; width: 54px; height: 54px;
+      bottom: calc(14px + env(safe-area-inset-bottom) + var(--stack-h, 0px));
+    }
     /* pastilles sur toute la largeur, defilables horizontalement */
     #chips { top: 70px; left: 0; right: 0; transform: none; max-width: none; padding: 2px 8px 6px; }
     #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
@@ -587,7 +590,6 @@
       surfaceHtml(p.surface) +
       profileSvg(p.profile, p.profile_grades, p.color);
     detailEl.classList.add("show");
-    document.body.classList.add("has-detail");
     currentClimb = f;
     setUrlForClimb(f);
     // mobile : la fiche prend la place de la liste, qui se replie sur son en-tete
@@ -598,10 +600,10 @@
   function clearSelection() {
     map.setFilter("climbs-halo", ["==", ["get", "idx"], -1]);
     detailEl.classList.remove("show");
-    document.body.classList.remove("has-detail");
     selectedId = null;
     currentClimb = null;
     setUrlForClimb(null);
+    updateSheetOffset();
   }
 
   // Les lignes font 2.5 px : impossible de les viser au doigt. On cherche donc
@@ -866,13 +868,18 @@
   // positionne au-dessus via la variable CSS --sheet-h
   function updateSheetOffset() {
     const open = narrow() && panelEl.style.display === "flex";
-    document.body.classList.toggle("has-sheet", open);
-    document.documentElement.style.setProperty("--sheet-h", open ? panelEl.offsetHeight + "px" : "0px");
+    const sheetH = open ? panelEl.offsetHeight : 0;
+    document.documentElement.style.setProperty("--sheet-h", sheetH + "px");
+    // pile en bas de l'ecran (mobile) : feuille + fiche de cote (qui se pose au-dessus, 8 px d'ecart)
+    const detailShown = narrow() && detailEl.classList.contains("show");
+    const stackH = sheetH + (detailShown ? detailEl.offsetHeight + 8 : 0);
+    document.documentElement.style.setProperty("--stack-h", narrow() ? stackH + "px" : "0px");
   }
 
   // la feuille change de hauteur (contenu, repli, affichage) : on suit tout
   // avec un ResizeObserver plutot que de penser a rappeler updateSheetOffset
   new ResizeObserver(updateSheetOffset).observe(panelEl);
+  new ResizeObserver(updateSheetOffset).observe(detailEl);
   window.addEventListener("resize", updateSheetOffset);
 
   document.getElementById("panel-header").addEventListener("click", (e) => {
