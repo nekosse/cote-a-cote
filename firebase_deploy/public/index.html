@@ -299,7 +299,7 @@
 
   const basemapBtn = document.getElementById("basemap-btn");
 
-  function setSatellite(on) {
+  function setSatellite(on, opts) {
     for (const id of basemapLayerIds) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");
     map.setLayoutProperty("satellite", "visibility", on ? "visible" : "none");
     // la vignette montre la vue VERS laquelle on bascule, comme sur Google Maps
@@ -307,7 +307,11 @@
     basemapBtn.classList.toggle("thumb-sat", !on);
     basemapBtn.querySelector(".cap").textContent = on ? "Plan" : "Satellite";
     basemapBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    try { localStorage.setItem("basemap", on ? "satellite" : "plan"); } catch (e) { /* stockage indisponible */ }
+    // un lien recu ne doit pas ecraser la preference enregistree du destinataire
+    if (!opts || opts.persist !== false) {
+      try { localStorage.setItem("basemap", on ? "satellite" : "plan"); } catch (e) { /* stockage indisponible */ }
+    }
+    if (currentClimb) setUrlForClimb(currentClimb);
   }
   basemapBtn.addEventListener("click", () => setSatellite(!basemapBtn.classList.contains("thumb-plan")));
 
@@ -447,20 +451,37 @@
   // partages. Un point de la ligne + nom + longueur + D+ se retrouvent, eux, d'une
   // version des donnees a l'autre (lat/lon sert a aller sur place, le reste a
   // reconnaitre LA cote parmi celles du coin).
+  // Etat de la vue joint au lien, pour que le destinataire voie la meme chose :
+  // &bm=sat|plan (fond de plan) et &f=asphalt,dirt (pastilles de revetement actives).
+  function stateParams() {
+    let q = "&bm=" + (basemapBtn.classList.contains("thumb-plan") ? "sat" : "plan");
+    if (activeSurfaces.size) q += "&f=" + [...activeSurfaces].join(",");
+    return q;
+  }
+
   function climbHash(f) {
     const lines = f.geometry.type === "MultiLineString" ? f.geometry.coordinates : [f.geometry.coordinates];
     const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), lines[0]);
     const [lng, lat] = longest[Math.floor(longest.length / 2)];
     const p = f.properties;
-    return "#c=" + lat.toFixed(5) + "," + lng.toFixed(5) + "," + p.length_m + "," + p.elev_gain_m + "," + encodeURIComponent(p.name);
+    return "#c=" + lat.toFixed(5) + "," + lng.toFixed(5) + "," + p.length_m + "," + p.elev_gain_m + "," +
+      encodeURIComponent(p.name) + stateParams();
   }
 
   function parseClimbHash() {
-    const m = /^#c=(-?[\d.]+),(-?[\d.]+),(\d+),(\d+),(.+)$/.exec(location.hash);
+    // le nom est encode (encodeURIComponent) : ni "&" ni "," bruts dedans
+    const [main, ...rest] = location.hash.slice(1).split("&");
+    const m = /^c=(-?[\d.]+),(-?[\d.]+),(\d+),(\d+),(.+)$/.exec(main);
     if (!m) return null;
     let name;
     try { name = decodeURIComponent(m[5]); } catch (e) { return null; }
-    return { lat: +m[1], lng: +m[2], len: +m[3], gain: +m[4], name };
+    const params = Object.fromEntries(rest.map((kv) => kv.split("=")).filter((kv) => kv.length === 2));
+    const validKeys = new Set(SURFACE_CATS.map((c) => c.key));
+    return {
+      lat: +m[1], lng: +m[2], len: +m[3], gain: +m[4], name,
+      bm: params.bm === "sat" ? "sat" : params.bm === "plan" ? "plan" : null,
+      filters: (params.f || "").split(",").filter((k) => validKeys.has(k)),
+    };
   }
 
   function setUrlForClimb(f) {
@@ -488,6 +509,16 @@
     const t = parseClimbHash();
     if (!t || openingFromHash) return;
     openingFromHash = true;
+    // meme vue que l'expediteur : fond de plan et filtres (applique AVANT la cote, car
+    // changer un filtre deselectionne)
+    if (t.bm) setSatellite(t.bm === "sat", { persist: false });
+    const wanted = new Set(t.filters);
+    const same = wanted.size === activeSurfaces.size && [...wanted].every((k) => activeSurfaces.has(k));
+    if (!same) {
+      activeSurfaces.clear();
+      wanted.forEach((k) => activeSurfaces.add(k));
+      applySurfaceFilter();
+    }
     map.jumpTo({ center: [t.lng, t.lat], zoom: 15 });
     for (let i = 0; i < 8; i++) {
       await new Promise((r) => setTimeout(r, 500));
