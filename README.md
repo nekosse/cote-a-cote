@@ -104,7 +104,9 @@ tippecanoe -o climbs_france.mbtiles -zg --extend-zooms-if-still-dropping --drop-
 pmtiles convert climbs_france.mbtiles climbs_france.pmtiles --force
 
 cp interactive_departement.html ../firebase_deploy/public/index.html
-cp climbs_france.pmtiles ../firebase_deploy/public/
+# nom versionne (ex: climbs_france_AAAA-MM-JJ.pmtiles) a reporter dans le html : le fichier est mis en
+# cache 1h par les navigateurs, remplacer un fichier de meme nom casse la lecture PMTiles
+cp climbs_france.pmtiles ../firebase_deploy/public/climbs_france_AAAA-MM-JJ.pmtiles
 cd ../firebase_deploy && firebase deploy --only hosting:app
 ```
 
