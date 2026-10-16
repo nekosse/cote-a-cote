@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PMTiles Indre-et-Loire - Cote a cote</title>
+<title>Côte à côte</title>
+<meta name="description" content="Toutes les côtes cyclables de France : pente, dénivelé, profil et revêtement.">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
@@ -23,7 +24,28 @@
     transition: opacity .18s ease, transform .18s ease;
   }
   #detail.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
-  #detail .name { font-size: 17px; font-weight: 800; margin-bottom: 10px; }
+  #detail .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  #detail .name { font-size: 17px; font-weight: 800; }
+  #detail .share {
+    flex: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid rgba(15,23,42,0.14); background: #fff; color: #1f2937; border-radius: 8px;
+    padding: 5px 9px; font: inherit; font-size: 12px; font-weight: 600;
+  }
+  #detail .share:hover { background: #f3f4f6; }
+  #detail .share svg { width: 14px; height: 14px; }
+  #detail .share.done { background: #ecfdf5; border-color: #86efac; color: #047857; }
+
+  /* toast de confirmation, centre en bas (au-dessus de la fiche sur telephone) */
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; z-index: 10000; max-width: calc(100vw - 32px);
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 999px;
+    background: rgba(17,24,39,0.94); color: #fff; font-size: 13.5px; font-weight: 600;
+    box-shadow: 0 8px 28px rgba(0,0,0,.3); pointer-events: none;
+    opacity: 0; transform: translate(-50%, 10px); transition: opacity .18s ease, transform .18s ease;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast svg { width: 16px; height: 16px; flex: none; color: #4ade80; }
+  #toast.error svg { color: #fbbf24; }
   #detail .stats { display: flex; gap: 18px; }
   #detail .stat b { display: block; font-size: 20px; }
   #detail .stat span { font-size: 10px; color: #6b7280; text-transform: uppercase; }
@@ -36,13 +58,35 @@
     font-size: 10.5px; color: #9ca3af; margin-top: 2px;
   }
 
+  #tools { position: fixed; top: 12px; right: 15px; z-index: 9999; display: flex; gap: 8px; }
   #select-btn {
-    position: fixed; top: 12px; right: 15px; z-index: 9999;
     background: rgba(255,255,255,0.95); border: none; border-radius: 8px;
     padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,.2); font-family: inherit;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2); font-family: inherit; white-space: nowrap;
   }
   #select-btn.active { background: #2563eb; color: white; }
+
+  /* selecteur de fond de plan a la Google Maps : vignette de l'AUTRE vue, en bas a gauche */
+  #basemap-btn {
+    position: fixed; left: 15px; bottom: calc(56px + var(--sheet-h, 0px)); z-index: 9998;
+    width: 64px; height: 64px; padding: 0; border: 2px solid #fff; border-radius: 12px;
+    overflow: hidden; cursor: pointer; background: #e5e7eb center / cover no-repeat;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35); font-family: inherit;
+    transition: transform .12s ease;
+  }
+  #basemap-btn:hover { transform: scale(1.04); }
+  #basemap-btn .cap {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 0 3px;
+    font-size: 11px; font-weight: 700; color: #fff; text-align: center;
+    background: linear-gradient(transparent, rgba(0,0,0,.6)); text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  }
+  /* vignette "Plan" (affichee quand le satellite est actif) : mini-carte dessinee en SVG */
+  #basemap-btn.thumb-plan {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%23eceff1'/><path d='M0 46 C18 38 30 52 64 40 L64 64 L0 64Z' fill='%23aecbe8'/><rect x='6' y='6' width='20' height='16' rx='3' fill='%23cfe6c8'/><path d='M0 30 H64 M30 0 V64 M46 0 L18 64' stroke='%23fff' stroke-width='4' fill='none'/><path d='M0 18 H64 M12 0 V64' stroke='%23fff' stroke-width='2' fill='none'/><path d='M30 30 H64' stroke='%23f2b04a' stroke-width='3' fill='none'/></svg>");
+  }
+  #basemap-btn.thumb-sat {
+    background-image: url("https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX=13&TILECOL=4111&TILEROW=2868");
+  }
   #select-btn.disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* filtre global par revetement : barre de pastilles sous le bandeau du haut */
@@ -122,7 +166,11 @@
       top: 8px; left: 8px; right: 140px; transform: none;
       font-size: 11.5px; padding: 6px 10px; line-height: 1.3;
     }
-    #select-btn { top: 8px; right: 8px; padding: 10px 12px; }
+    #tools { top: 8px; right: 8px; gap: 6px; }
+    #select-btn { padding: 10px 12px; }
+    /* telephone : vignette plus petite, et masquee quand une fiche / la liste de zone occupe le bas */
+    #basemap-btn { left: 8px; bottom: calc(12px + env(safe-area-inset-bottom)); width: 54px; height: 54px; }
+    body.has-detail #basemap-btn, body.has-sheet #basemap-btn { display: none; }
     /* pastilles sur toute la largeur, defilables horizontalement */
     #chips { top: 70px; left: 0; right: 0; transform: none; max-width: none; padding: 2px 8px 6px; }
     #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
@@ -130,7 +178,8 @@
       left: 8px; right: 8px; width: auto; box-sizing: border-box;
       padding: 12px 16px;
     }
-    #detail .name { font-size: 16px; margin-bottom: 6px; }
+    #detail .name { font-size: 16px; }
+    #detail .head { margin-bottom: 6px; }
     #detail .profile { margin-top: 8px; }
     /* liste de la zone : bottom sheet (deux etats : ouverte / repliee sur l'en-tete) */
     #panel {
@@ -153,9 +202,13 @@
 </head>
 <body>
 <div id="status">chargement...</div>
-<button id="select-btn">&#9635; Selectionner une zone</button>
+<div id="tools">
+  <button id="select-btn">&#9635; Selectionner une zone</button>
+</div>
 <div id="chips" role="group" aria-label="Filtrer par revêtement"></div>
+<button id="basemap-btn" class="thumb-sat" aria-label="Changer de fond de plan"><span class="cap">Satellite</span></button>
 <div id="select-rect"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <div id="select-msg"></div>
 <div id="panel">
   <div id="panel-header">
@@ -183,7 +236,29 @@
   });
 
   // Les couches de cotes s'ajoutent par-dessus le style du fond de plan.
+  // Fond satellite : orthophotos IGN (Geoplateforme), libres et sans cle, France
+  // entiere. Insere sous les etiquettes du fond vectoriel, qui restent visibles.
+  let basemapLayerIds = [];
+
   map.on("style.load", () => {
+    const styleLayers = map.getStyle().layers;
+    basemapLayerIds = styleLayers.filter((l) => l.type !== "symbol").map((l) => l.id);
+    const firstSymbol = styleLayers.find((l) => l.type === "symbol");
+    map.addSource("satellite", {
+      type: "raster",
+      tiles: ["https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0" +
+        "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg" +
+        "&TILEMATRIX={z}&TILECOL={x}&TILEROW={y}"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© IGN",
+    });
+    map.addLayer({ id: "satellite", type: "raster", source: "satellite", layout: { visibility: "none" } },
+      firstSymbol && firstSymbol.id);
+    let saved = false;
+    try { saved = localStorage.getItem("basemap") === "satellite"; } catch (e) { /* stockage indisponible */ }
+    setSatellite(saved);
+
     map.addSource("climbs", {
       type: "vector",
       url: "pmtiles://climbs_france_2026-10-16b.pmtiles",
@@ -222,15 +297,37 @@
     });
   });
 
+  const basemapBtn = document.getElementById("basemap-btn");
+
+  function setSatellite(on) {
+    for (const id of basemapLayerIds) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");
+    map.setLayoutProperty("satellite", "visibility", on ? "visible" : "none");
+    // la vignette montre la vue VERS laquelle on bascule, comme sur Google Maps
+    basemapBtn.classList.toggle("thumb-plan", on);
+    basemapBtn.classList.toggle("thumb-sat", !on);
+    basemapBtn.querySelector(".cap").textContent = on ? "Plan" : "Satellite";
+    basemapBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    try { localStorage.setItem("basemap", on ? "satellite" : "plan"); } catch (e) { /* stockage indisponible */ }
+  }
+  basemapBtn.addEventListener("click", () => setSatellite(!basemapBtn.classList.contains("thumb-plan")));
+
   const statusEl = document.getElementById("status");
   const detailEl = document.getElementById("detail");
 
+  let currentClimb = null;
   let hoveredId = null;
   let selectedId = null;
-  const N_CLIMBS = 313801; // France + Corse, calcule depuis le PBF OSRM pretraite (elevations precalculees)
+  const N_CLIMBS = 509944; // France + Corse, calcule depuis le PBF OSRM pretraite (elevations precalculees)
 
   map.on("load", () => {
-    statusEl.textContent = N_CLIMBS + " cotes (France + Corse) - survolez, cliquez, ou selectionnez une zone";
+    openClimbFromHash();
+    statusEl.textContent = N_CLIMBS.toLocaleString("fr-FR") + " cotes (France + Corse) - survolez, cliquez, ou selectionnez une zone";
+  });
+
+  window.addEventListener("hashchange", () => { if (parseClimbHash()) openClimbFromHash(); });
+  detailEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-share]");
+    if (btn && currentClimb) copyClimbLink(currentClimb, btn);
   });
 
   map.on("mousemove", "climbs-line", (e) => {
@@ -322,6 +419,115 @@
     return '<div class="surface"><span class="label">revêtement</span>' + parts.join(" · ") + "</div>";
   }
 
+  // Les noms viennent d'OSM, editable par n'importe qui : jamais dans innerHTML tels quels.
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const SITE_TITLE = "Côte à côte";
+  const SVG_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  const COPY_ICON = "<svg " + SVG_ATTRS + '><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  const CHECK_ICON = "<svg " + SVG_ATTRS + '><path d="M20 6L9 17l-5-5"/></svg>';
+  const WARN_ICON = "<svg " + SVG_ATTRS + '><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+
+  // Toast de confirmation. Sur telephone la fiche occupe le bas de l'ecran : on se
+  // pose juste au-dessus d'elle plutot que dessous.
+  const toastEl = document.getElementById("toast");
+  let toastTimer = null;
+  function showToast(text, kind) {
+    toastEl.innerHTML = (kind === "error" ? WARN_ICON : CHECK_ICON) + "<span>" + esc(text) + "</span>";
+    toastEl.classList.toggle("error", kind === "error");
+    const card = detailEl.classList.contains("show") ? detailEl.getBoundingClientRect() : null;
+    toastEl.style.bottom = (card && narrow() ? window.innerHeight - card.top + 12 : 28) + "px";
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
+  }
+
+  // Identifiant partageable d'une cote : "#c=lat,lon,longueur,D+,nom". L'idx n'est pas
+  // utilisable : il change a chaque recalcul des donnees et casserait les liens deja
+  // partages. Un point de la ligne + nom + longueur + D+ se retrouvent, eux, d'une
+  // version des donnees a l'autre (lat/lon sert a aller sur place, le reste a
+  // reconnaitre LA cote parmi celles du coin).
+  function climbHash(f) {
+    const lines = f.geometry.type === "MultiLineString" ? f.geometry.coordinates : [f.geometry.coordinates];
+    const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), lines[0]);
+    const [lng, lat] = longest[Math.floor(longest.length / 2)];
+    const p = f.properties;
+    return "#c=" + lat.toFixed(5) + "," + lng.toFixed(5) + "," + p.length_m + "," + p.elev_gain_m + "," + encodeURIComponent(p.name);
+  }
+
+  function parseClimbHash() {
+    const m = /^#c=(-?[\d.]+),(-?[\d.]+),(\d+),(\d+),(.+)$/.exec(location.hash);
+    if (!m) return null;
+    let name;
+    try { name = decodeURIComponent(m[5]); } catch (e) { return null; }
+    return { lat: +m[1], lng: +m[2], len: +m[3], gain: +m[4], name };
+  }
+
+  function setUrlForClimb(f) {
+    try { history.replaceState(null, "", f ? climbHash(f) : location.pathname + location.search); } catch (e) { /* ignore */ }
+    document.title = f ? f.properties.name + " - " + SITE_TITLE : SITE_TITLE;
+  }
+
+  // Retrouve la cote ciblee parmi celles actuellement rendues : meme nom, longueur
+  // proche (les donnees peuvent avoir ete recalculees), la plus proche du point.
+  function findClimb(t) {
+    const here = map.project([t.lng, t.lat]);
+    const tol = Math.max(40, t.len * 0.1);
+    let best = null, bestScore = Infinity;
+    for (const f of map.queryRenderedFeatures({ layers: ["climbs-line"] })) {
+      const p = f.properties;
+      if (p.name !== t.name) continue;
+      const score = distToLinePx(here, f.geometry) + (Math.abs(p.length_m - t.len) > tol ? 1e6 : 0);
+      if (score < bestScore) { best = f; bestScore = score; }
+    }
+    return bestScore < 1e6 ? best : null;
+  }
+
+  let openingFromHash = false;
+  async function openClimbFromHash() {
+    const t = parseClimbHash();
+    if (!t || openingFromHash) return;
+    openingFromHash = true;
+    map.jumpTo({ center: [t.lng, t.lat], zoom: 15 });
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (!map.areTilesLoaded()) await new Promise((r) => map.once("idle", r));
+      const f = findClimb(t);
+      if (f) { selectClimb(f); openingFromHash = false; return; }
+    }
+    openingFromHash = false;
+    showToast("Côte introuvable : lien d'une ancienne version des données ?", "error");
+  }
+
+  // Copie dans le presse-papiers (API moderne, repli execCommand pour les contextes
+  // ou elle est refusee), puis confirme par un toast et sur le bouton lui-meme.
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* repli */ }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  async function copyClimbLink(f, btn) {
+    const url = location.origin + location.pathname + climbHash(f);
+    if (await copyText(url)) {
+      showToast("Lien copié");
+      if (btn) {
+        btn.classList.add("done");
+        btn.innerHTML = CHECK_ICON + "Copié";
+        setTimeout(() => { btn.classList.remove("done"); btn.innerHTML = COPY_ICON + "Partager la côte"; }, 2000);
+      }
+    } else {
+      window.prompt("Copiez le lien de cette côte :", url);
+    }
+  }
+
   function selectClimb(f, opts) {
     opts = opts || {};
     selectedId = f.id;
@@ -340,7 +546,8 @@
     const p = f.properties;
     detailEl.style.borderLeftColor = p.color;
     detailEl.innerHTML =
-      '<div class="name">' + p.name + "</div>" +
+      '<div class="head"><div class="name">' + esc(p.name) + "</div>" +
+      '<button class="share" data-share aria-label="Partager la côte (copie le lien)">' + COPY_ICON + "Partager la côte</button></div>" +
       '<div class="stats">' +
       '<div class="stat"><b style="color:' + p.color + '">' + p.avg_grade.toFixed(1) + '%</b><span>pente</span></div>' +
       '<div class="stat"><b>' + p.length_m + '</b><span>longueur</span></div>' +
@@ -349,6 +556,9 @@
       surfaceHtml(p.surface) +
       profileSvg(p.profile, p.profile_grades, p.color);
     detailEl.classList.add("show");
+    document.body.classList.add("has-detail");
+    currentClimb = f;
+    setUrlForClimb(f);
     // mobile : la fiche prend la place de la liste, qui se replie sur son en-tete
     if (narrow() && panelEl.style.display === "flex") setPanelCollapsed(true);
     updateSheetOffset();
@@ -357,7 +567,10 @@
   function clearSelection() {
     map.setFilter("climbs-halo", ["==", ["get", "idx"], -1]);
     detailEl.classList.remove("show");
+    document.body.classList.remove("has-detail");
     selectedId = null;
+    currentClimb = null;
+    setUrlForClimb(null);
   }
 
   // Les lignes font 2.5 px : impossible de les viser au doigt. On cherche donc
@@ -622,6 +835,7 @@
   // positionne au-dessus via la variable CSS --sheet-h
   function updateSheetOffset() {
     const open = narrow() && panelEl.style.display === "flex";
+    document.body.classList.toggle("has-sheet", open);
     document.documentElement.style.setProperty("--sheet-h", open ? panelEl.offsetHeight + "px" : "0px");
   }
 
@@ -657,7 +871,7 @@
       const p = f.properties;
       return '<li data-idx="' + p.idx + '">' +
         '<span class="rank" style="background:' + p.color + '">' + (i + 1) + "</span>" +
-        '<div><div class="name">' + p.name + "</div>" +
+        '<div><div class="name">' + esc(p.name) + "</div>" +
         '<div class="stats">' + p.avg_grade.toFixed(1) + "% · " + p.length_m + " m · <b>+" + p.elev_gain_m + " m</b></div>" +
         "</div></li>";
     }).join("");
