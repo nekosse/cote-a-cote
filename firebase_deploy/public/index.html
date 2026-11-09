@@ -67,8 +67,23 @@
   #select-btn.active { background: #2563eb; color: white; }
 
   /* selecteur de fond de plan a la Google Maps : vignette de l'AUTRE vue, en bas a gauche */
-  #basemap-btn {
+  /* pile de controles en bas a gauche : localisation au-dessus, fond de plan en dessous */
+  #mapctl {
     position: fixed; left: 15px; bottom: 56px; z-index: 9998;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  }
+  #locate-btn {
+    width: 44px; height: 44px; padding: 0; margin-left: 10px; border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.97); color: #374151; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  }
+  #locate-btn svg { width: 22px; height: 22px; }
+  #locate-btn.on { color: #2563eb; }
+  #locate-btn.busy svg { animation: locate-pulse 1s ease-in-out infinite; }
+  @keyframes locate-pulse { 50% { opacity: .35; } }
+  #basemap-btn {
+    position: relative;
     width: 64px; height: 64px; padding: 0; border: 2px solid #fff; border-radius: 12px;
     overflow: hidden; cursor: pointer; background: #e5e7eb center / cover no-repeat;
     box-shadow: 0 2px 8px rgba(0,0,0,.35); font-family: inherit;
@@ -107,6 +122,72 @@
   .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1.5px rgba(255,255,255,0.9); }
   .chip.on { background: #2563eb; border-color: #2563eb; color: #fff; }
   .chip.on:hover { background: #1d4ed8; }
+
+  /* action "Itineraire Geovelo" dans la liste de zone */
+  #panel-actions { padding: 8px 12px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+  #route-btn {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 9px 12px; border: none; border-radius: 10px; cursor: pointer;
+    background: #2563eb; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  }
+  #route-btn:hover { background: #1d4ed8; }
+  #route-btn svg { width: 16px; height: 16px; }
+  #route-btn[hidden], #panel-actions[hidden] { display: none; }
+
+  /* fenetre de reglage de l'itineraire */
+  #route-modal {
+    position: fixed; inset: 0; z-index: 10001; display: none;
+    align-items: center; justify-content: center; padding: 16px;
+    background: rgba(15,23,42,0.45);
+  }
+  #route-modal.open { display: flex; }
+  #route-modal .card {
+    width: 100%; max-width: 430px; max-height: calc(100vh - 32px); overflow-y: auto;
+    background: #fff; border-radius: 16px; padding: 18px 18px 14px;
+    box-shadow: 0 24px 70px rgba(15,23,42,0.4);
+  }
+  #route-modal .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  #route-modal h2 { margin: 0; font-size: 17px; }
+  #route-modal .x { border: none; background: none; font-size: 26px; line-height: 1; color: #9ca3af; cursor: pointer; padding: 2px 6px; }
+  #route-modal .lead { margin: 0 0 14px; font-size: 13px; color: #6b7280; line-height: 1.4; }
+  #route-modal .field { margin-bottom: 14px; }
+  #route-modal .label { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; }
+  #route-modal .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  #route-modal .seg button {
+    border: 1px solid rgba(15,23,42,0.15); background: #fff; color: #374151; border-radius: 999px;
+    padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #route-modal .seg button.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+  #route-modal .seg button[disabled] { opacity: .45; cursor: not-allowed; }
+  #route-modal .link { margin-top: 8px; background: none; border: none; padding: 0; color: #2563eb; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  #route-modal input[type=range] { width: 100%; accent-color: #2563eb; }
+  #route-modal .check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+  #route-modal .check input { width: 18px; height: 18px; accent-color: #2563eb; }
+  #route-summary { margin: 4px 0 14px; padding: 10px 12px; border-radius: 10px; background: #f3f4f6; font-size: 13px; line-height: 1.5; color: #1f2937; }
+  #route-summary b { font-weight: 800; }
+  #route-modal .note { margin: 0 0 12px; font-size: 11.5px; color: #6b7280; line-height: 1.4; }
+  #route-modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  #route-modal .actions button, #route-open {
+    border-radius: 10px; padding: 10px 16px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+  }
+  #route-cancel { border: 1px solid rgba(15,23,42,0.15); background: #fff; color: #374151; }
+  #route-open { border: none; background: #2563eb; color: #fff; }
+  #route-open.disabled { background: #9ca3af; pointer-events: none; }
+
+  /* barre "placer mon depart" + repere domicile */
+  #pick-bar {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10002; display: none;
+    align-items: center; gap: 12px; padding: 9px 12px 9px 16px; border-radius: 999px;
+    background: #111827; color: #fff; font-size: 13.5px; font-weight: 600; box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    max-width: calc(100vw - 24px);
+  }
+  #pick-bar.show { display: flex; }
+  #pick-bar button { border: none; border-radius: 999px; padding: 6px 12px; background: #374151; color: #fff; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .home-pin {
+    width: 32px; height: 32px; border-radius: 50%; background: #fff; border: 2px solid #2563eb;
+    display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  }
 
   #select-rect {
     position: fixed; z-index: 9998; pointer-events: none;
@@ -170,10 +251,9 @@
     #select-btn { padding: 10px 12px; }
     /* telephone : vignette plus petite, posee AU-DESSUS de la fiche / de la liste de zone
        (--stack-h = hauteur de cette pile, mise a jour par updateSheetOffset) */
-    #basemap-btn {
-      left: 8px; width: 54px; height: 54px;
-      bottom: calc(14px + env(safe-area-inset-bottom) + var(--stack-h, 0px));
-    }
+    #mapctl { left: 8px; bottom: calc(14px + env(safe-area-inset-bottom) + var(--stack-h, 0px)); }
+    #locate-btn { margin-left: 5px; }
+    #basemap-btn { width: 54px; height: 54px; }
     /* pastilles sur toute la largeur, defilables horizontalement */
     #chips { top: 70px; left: 0; right: 0; transform: none; max-width: none; padding: 2px 8px 6px; }
     #select-msg { top: 52px; right: 8px; left: 8px; max-width: none; font-size: 13px; }
@@ -195,7 +275,11 @@
       content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px;
       margin-left: -18px; border-radius: 2px; background: #d1d5db;
     }
-    #panel.collapsed #panel-list { display: none; }
+    #panel.collapsed #panel-list, #panel.collapsed #panel-actions { display: none; }
+    /* fenetre de reglage : feuille en bas de l'ecran */
+    #route-modal { align-items: flex-end; padding: 0; }
+    #route-modal .card { max-width: none; border-radius: 16px 16px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+    #pick-bar { top: 8px; }
     #panel.collapsed #panel-header { border-bottom: none; }
     /* la fiche d'une cote se pose juste au-dessus de la feuille */
     #detail { bottom: calc(var(--sheet-h, 0px) + 8px + env(safe-area-inset-bottom)); }
@@ -209,7 +293,12 @@
   <button id="select-btn">&#9635; Selectionner une zone</button>
 </div>
 <div id="chips" role="group" aria-label="Filtrer par revêtement"></div>
-<button id="basemap-btn" class="thumb-sat" aria-label="Changer de fond de plan"><span class="cap">Satellite</span></button>
+<div id="mapctl">
+  <button id="locate-btn" aria-label="Afficher ma position" title="Ma position">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  </button>
+  <button id="basemap-btn" class="thumb-sat" aria-label="Changer de fond de plan"><span class="cap">Satellite</span></button>
+</div>
 <div id="select-rect"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="select-msg"></div>
@@ -221,8 +310,40 @@
     </div>
     <span id="panel-close">&times;</span>
   </div>
+  <div id="panel-actions" hidden>
+    <button id="route-btn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H16a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h7.5"/></svg>
+      Itinéraire Geovelo
+    </button>
+  </div>
   <ul id="panel-list"></ul>
 </div>
+<div id="route-modal" role="dialog" aria-modal="true" aria-labelledby="route-title">
+  <div class="card">
+    <div class="head"><h2 id="route-title">Itinéraire Geovelo</h2><button class="x" id="route-close" aria-label="Fermer">&times;</button></div>
+    <p class="lead">Une boucle qui monte les côtes de la zone, du bas vers le haut, au départ de chez vous. Elle s'ouvre dans Geovelo, qui calcule le trajet.</p>
+    <div class="field">
+      <div class="label">Départ et arrivée</div>
+      <div class="seg">
+        <button type="button" id="route-home">🏠 Chez moi</button>
+        <button type="button" id="route-pos">📍 Ma position</button>
+      </div>
+      <button type="button" class="link" id="route-pick">Définir mon domicile sur la carte</button>
+    </div>
+    <div class="field" id="route-count-field">
+      <div class="label">Côtes à enchaîner : <span id="route-count-label"></span></div>
+      <input type="range" id="route-count" min="1" max="1" value="1">
+    </div>
+    <div class="field"><label class="check"><input type="checkbox" id="route-loop" checked> Revenir au point de départ (boucle)</label></div>
+    <div id="route-summary"></div>
+    <p class="note">Les côtes les plus grosses (D+) sont retenues en premier, puis ordonnées pour limiter les allers-retours. Vous pourrez réordonner ou ajuster les étapes dans Geovelo.</p>
+    <div class="actions">
+      <button type="button" id="route-cancel">Annuler</button>
+      <a id="route-open" href="#" target="_blank" rel="noopener">Ouvrir dans Geovelo ↗</a>
+    </div>
+  </div>
+</div>
+<div id="pick-bar" role="status"><span>Touchez la carte pour placer votre domicile</span><button type="button" id="pick-cancel">Annuler</button></div>
 <div id="detail"></div>
 <div id="map"></div>
 <script>
@@ -298,6 +419,7 @@
       filter: ["==", ["get", "idx"], -1],
       paint: { "line-color": ["get", "color"], "line-width": 13, "line-opacity": 0.32 },
     });
+    addUserLocationLayers();
   });
 
   const basemapBtn = document.getElementById("basemap-btn");
@@ -317,6 +439,118 @@
     if (currentClimb) setUrlForClimb(currentClimb);
   }
   basemapBtn.addEventListener("click", () => setSatellite(!basemapBtn.classList.contains("thumb-plan")));
+
+  // --- ma position ---
+  // La position reste dans le navigateur : elle n'est jamais envoyee nulle part, elle
+  // sert uniquement a dessiner le point bleu et a centrer la carte.
+  const locateBtn = document.getElementById("locate-btn");
+  let geoWatchId = null;
+  let userPos = null;
+  const emptyFC = { type: "FeatureCollection", features: [] };
+
+  function addUserLocationLayers() {
+    map.addSource("me", { type: "geojson", data: emptyFC });
+    map.addSource("me-accuracy", { type: "geojson", data: emptyFC });
+    map.addLayer({ id: "me-accuracy-fill", type: "fill", source: "me-accuracy",
+      paint: { "fill-color": "#2563eb", "fill-opacity": 0.12 } });
+    map.addLayer({ id: "me-accuracy-line", type: "line", source: "me-accuracy",
+      paint: { "line-color": "#2563eb", "line-opacity": 0.35, "line-width": 1 } });
+    map.addLayer({ id: "me-dot", type: "circle", source: "me",
+      paint: { "circle-radius": 8, "circle-color": "#2563eb", "circle-stroke-color": "#fff",
+        "circle-stroke-width": 3, "circle-pitch-alignment": "map" } });
+    if (userPos) drawUserPosition();
+  }
+
+  // cercle de precision en metres -> polygone lon/lat
+  function accuracyCircle(lng, lat, meters, steps = 48) {
+    const dLat = meters / 111320;
+    const dLng = meters / (111320 * Math.cos((lat * Math.PI) / 180));
+    const ring = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * 2 * Math.PI;
+      ring.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)]);
+    }
+    return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+  }
+
+  function drawUserPosition() {
+    if (!map.getSource("me") || !userPos) return;
+    map.getSource("me").setData({ type: "FeatureCollection", features: [
+      { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [userPos.lng, userPos.lat] } }] });
+    map.getSource("me-accuracy").setData(userPos.accuracy < 3000
+      ? { type: "FeatureCollection", features: [accuracyCircle(userPos.lng, userPos.lat, userPos.accuracy)] } : emptyFC);
+  }
+
+  function stopLocating() {
+    if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+    userPos = null;
+    locateBtn.classList.remove("on", "busy");
+    if (map.getSource("me")) { map.getSource("me").setData(emptyFC); map.getSource("me-accuracy").setData(emptyFC); }
+  }
+
+  function geoErrorMessage(err) {
+    // les navigateurs integres a une application (ex : Electron) refusent d'office, sans
+    // jamais proposer d'autorisation : mieux vaut orienter vers un vrai navigateur
+    if (err && err.code === 1) return "Localisation bloquée par ce navigateur. Autorisez-la dans ses réglages, ou ouvrez le site dans Chrome ou Safari.";
+    if (err && err.code === 3) return "Localisation trop longue, réessayez dehors ou avec le GPS activé.";
+    return "Position indisponible pour le moment.";
+  }
+
+  function centerOnUser() {
+    map.flyTo({ center: [userPos.lng, userPos.lat], zoom: Math.max(map.getZoom(), 14), duration: 900 });
+  }
+
+  // Demarre le suivi. opts.center : se centrer sur la premiere position recue
+  // (pas si l'utilisateur a deja deplace la carte lui-meme entre-temps).
+  let userMovedMap = false;
+  map.on("movestart", (e) => { if (e.originalEvent) userMovedMap = true; });
+
+  function startLocating(opts) {
+    if (!navigator.geolocation || geoWatchId !== null) return;
+    locateBtn.classList.add("busy");
+    let first = true;
+    geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        userPos = { lng: pos.coords.longitude, lat: pos.coords.latitude, accuracy: pos.coords.accuracy };
+        locateBtn.classList.remove("busy");
+        locateBtn.classList.add("on");
+        drawUserPosition();
+        if (first) {
+          first = false;
+          if (opts.center && !(opts.auto && userMovedMap)) centerOnUser();
+        }
+      },
+      (err) => { stopLocating(); if (!opts.auto) showToast(geoErrorMessage(err), "error"); },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
+    );
+  }
+
+  locateBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) { showToast("Localisation non disponible sur ce navigateur.", "error"); return; }
+    if (geoWatchId !== null && userPos) {
+      // deja suivi : si la carte est deja centree sur moi, on arrete ; sinon on recentre
+      const p = map.project([userPos.lng, userPos.lat]);
+      const c = map.project(map.getCenter());
+      if (Math.hypot(p.x - c.x, p.y - c.y) < 40) { stopLocating(); showToast("Localisation désactivée"); }
+      else centerOnUser();
+      return;
+    }
+    if (geoWatchId !== null) return; // premiere position encore en attente
+    startLocating({ center: true });
+  });
+
+  // A l'ouverture : si la localisation est DEJA autorisee pour ce site, on affiche le point
+  // et on se centre dessus, sans rien demander (aucune fenetre d'autorisation au chargement).
+  // Un lien de cote partage passe avant : on montre alors le point sans quitter la cote.
+  async function autoLocate() {
+    if (!navigator.geolocation || !navigator.permissions) return;
+    try {
+      const perm = await navigator.permissions.query({ name: "geolocation" });
+      if (perm.state === "granted") startLocating({ center: !parseClimbHash(), auto: true });
+    } catch (e) { /* permissions API indisponible : on ne fait rien */ }
+  }
+  map.on("load", autoLocate);
 
   const statusEl = document.getElementById("status");
   const detailEl = document.getElementById("detail");
@@ -642,7 +876,7 @@
   }
 
   map.on("click", (e) => {
-    if (selecting) return;
+    if (selecting || picking) return;
     const f = climbAt(e.point, e.originalEvent && e.originalEvent.pointerType === "touch"
       || window.matchMedia("(pointer: coarse)").matches);
     if (f) selectClimb(f); else clearSelection();
@@ -895,6 +1129,8 @@
       ? ["case", ["in", ["get", "idx"], ["literal", ids]], 0.9, 0.12]
       : 0.85);
 
+    zoneFeats = feats;
+    document.getElementById("panel-actions").hidden = !feats.some((f) => f.properties.bot && f.properties.top);
     panelEl.style.display = "flex";
     panelEl.classList.remove("collapsed");
     updateSheetOffset();
@@ -917,6 +1153,228 @@
       li.addEventListener("click", () => selectClimb(feats[i]));
     });
   }
+
+  // --- itineraire Geovelo ---
+  // Depuis la liste de zone : boucle qui monte chaque cote du bas vers le haut, au depart de
+  // chez soi. Lien Geovelo : from=lon,lat & steps=lon,lat;lon,lat;... & to=lon,lat (format lu dans
+  // le code public de geovelo.app : les etapes sont separees par ";").
+  const ROUTE_MAX_STEPS = 20; // prudence : la limite cote serveur Geovelo n'est pas connue
+  const ROUTE_MIN_GAP_M = 25; // deux etapes plus proches que ca n'en font qu'une
+
+  const routeModal = document.getElementById("route-modal");
+  const routeOpenEl = document.getElementById("route-open");
+  const routeCountEl = document.getElementById("route-count");
+  const routeLoopEl = document.getElementById("route-loop");
+  const routeHomeBtn = document.getElementById("route-home");
+  const routePosBtn = document.getElementById("route-pos");
+  const pickBar = document.getElementById("pick-bar");
+  let zoneFeats = [];
+  let routeStartKind = null; // "home" | "pos"
+  let routePos = null; // derniere position obtenue pour l'itineraire
+  let picking = false;
+  let homeMarker = null;
+
+  const parsePoint = (str) => {
+    const [lng, lat] = String(str || "").split(",").map(Number);
+    return Number.isFinite(lng) && Number.isFinite(lat) ? { lng, lat } : null;
+  };
+  const distM = (a, b) => haversineKm(a.lat, a.lng, b.lat, b.lng) * 1000;
+  const f6 = (p) => p.lng.toFixed(6) + "," + p.lat.toFixed(6);
+
+  function loadHome() {
+    try {
+      const h = JSON.parse(localStorage.getItem("home"));
+      return h && Number.isFinite(h.lng) && Number.isFinite(h.lat) ? h : null;
+    } catch (e) { return null; }
+  }
+  function drawHomeMarker(h) {
+    if (!homeMarker) {
+      const el = document.createElement("div");
+      el.className = "home-pin";
+      el.textContent = "🏠";
+      homeMarker = new maplibregl.Marker({ element: el });
+    }
+    homeMarker.setLngLat([h.lng, h.lat]).addTo(map);
+  }
+  function saveHome(h) {
+    try { localStorage.setItem("home", JSON.stringify(h)); } catch (e) { /* stockage indisponible */ }
+    drawHomeMarker(h);
+  }
+  map.on("load", () => { const h = loadHome(); if (h) drawHomeMarker(h); });
+
+  function climbsWithEnds() {
+    return zoneFeats
+      .map((f) => ({ f, bot: parsePoint(f.properties.bot), top: parsePoint(f.properties.top) }))
+      .filter((k) => k.bot && k.top);
+  }
+
+  // Ordre de visite : plus proche voisin, puis 2-opt. Chaque cote garde son sens (bas -> haut),
+  // on ne permute que l'ORDRE des cotes ; la distance de liaison est a vol d'oiseau.
+  function orderClimbs(start, climbs, loop) {
+    const cost = (seq) => {
+      let c = 0, cur = start;
+      for (const k of seq) { c += distM(cur, k.bot); cur = k.top; }
+      return loop ? c + distM(cur, start) : c;
+    };
+    const left = climbs.slice();
+    let seq = [], cur = start;
+    while (left.length) {
+      let bi = 0, bd = Infinity;
+      left.forEach((k, i) => { const d = distM(cur, k.bot); if (d < bd) { bd = d; bi = i; } });
+      const k = left.splice(bi, 1)[0];
+      seq.push(k);
+      cur = k.top;
+    }
+    let best = cost(seq), improved = true;
+    while (improved) {
+      improved = false;
+      for (let i = 0; i < seq.length - 1; i++) {
+        for (let j = i + 1; j < seq.length; j++) {
+          const cand = seq.slice(0, i).concat(seq.slice(i, j + 1).reverse(), seq.slice(j + 1));
+          const c = cost(cand);
+          if (c < best - 1) { seq = cand; best = c; improved = true; }
+        }
+      }
+    }
+    return { seq, transferM: best };
+  }
+
+  function routeStartPoint() {
+    if (routeStartKind === "home") return loadHome();
+    if (routeStartKind === "pos") return routePos;
+    return null;
+  }
+
+  // Calcule l'itineraire courant a partir des reglages de la fenetre.
+  function computeRoute() {
+    const start = routeStartPoint();
+    const all = climbsWithEnds();
+    if (!start || !all.length) return null;
+    const n = Math.min(+routeCountEl.value, all.length);
+    const loop = routeLoopEl.checked;
+    const { seq, transferM } = orderClimbs(start, all.slice(0, n), loop);
+
+    const wp = [];
+    for (const k of seq) wp.push(k.bot, k.top);
+    // sans boucle, le dernier sommet devient l'arrivee
+    const to = loop ? start : wp.pop();
+    const steps = [];
+    let prev = start;
+    for (const p of wp) { if (distM(prev, p) >= ROUTE_MIN_GAP_M) { steps.push(p); prev = p; } }
+    while (steps.length && distM(steps[steps.length - 1], to) < ROUTE_MIN_GAP_M) steps.pop();
+
+    const pts = [start, ...steps, to];
+    const lngs = pts.map((p) => p.lng), lats = pts.map((p) => p.lat);
+    const center = { lng: (Math.min(...lngs) + Math.max(...lngs)) / 2, lat: (Math.min(...lats) + Math.max(...lats)) / 2 };
+    const span = Math.max(Math.max(...lngs) - Math.min(...lngs), (Math.max(...lats) - Math.min(...lats)) * 1.4, 0.004);
+    const zoom = Math.max(8, Math.min(16, Math.floor(Math.log2(1081 / span))));
+    const q = new URLSearchParams({ c: f6(center), from: f6(start) });
+    if (steps.length) q.set("steps", steps.map(f6).join(";"));
+    q.set("to", f6(to));
+    q.set("z", String(zoom));
+
+    return {
+      url: "https://geovelo.app/fr/route/?" + q.toString(),
+      nClimbs: seq.length,
+      nSteps: steps.length,
+      dplus: seq.reduce((a, k) => a + k.f.properties.elev_gain_m, 0),
+      climbM: seq.reduce((a, k) => a + k.f.properties.length_m, 0),
+      transferM,
+    };
+  }
+
+  function renderRoute() {
+    const all = climbsWithEnds();
+    const maxClimbs = Math.max(1, Math.min(all.length, Math.floor(ROUTE_MAX_STEPS / 2)));
+    routeCountEl.max = String(maxClimbs);
+    if (+routeCountEl.value > maxClimbs || routeCountEl.dataset.touched !== "1") routeCountEl.value = String(maxClimbs);
+    document.getElementById("route-count-field").style.display = maxClimbs > 1 ? "" : "none";
+    const trimmed = all.length > maxClimbs ? " (sur " + all.length + " dans la zone)" : "";
+    document.getElementById("route-count-label").textContent = routeCountEl.value + trimmed;
+
+    routeHomeBtn.disabled = !loadHome();
+    routeHomeBtn.classList.toggle("on", routeStartKind === "home");
+    routePosBtn.classList.toggle("on", routeStartKind === "pos");
+
+    const r = computeRoute();
+    const summary = document.getElementById("route-summary");
+    if (!r) {
+      summary.innerHTML = routeStartPoint() ? "Aucune côte exploitable dans cette zone." :
+        "Choisissez un point de départ : <b>chez vous</b> (à définir sur la carte) ou <b>votre position</b>.";
+      routeOpenEl.classList.add("disabled");
+      routeOpenEl.removeAttribute("href");
+      return;
+    }
+    const km = Math.round((r.climbM + r.transferM) / 100) / 10;
+    summary.innerHTML = "<b>" + r.nClimbs + " côte" + (r.nClimbs > 1 ? "s" : "") + "</b> · D+ cumulé <b>" + Math.round(r.dplus) +
+      " m</b><br>" + (r.nSteps + 2) + " points (départ, " + r.nSteps + " étape" + (r.nSteps > 1 ? "s" : "") +
+      ", arrivée) · au moins <b>~" + km.toString().replace(".", ",") + " km</b> (estimation à vol d'oiseau)";
+    routeOpenEl.classList.remove("disabled");
+    routeOpenEl.href = r.url;
+  }
+
+  function openRouteModal() {
+    if (!climbsWithEnds().length) { showToast("Ces côtes n'ont pas d'extrémités connues.", "error"); return; }
+    routeCountEl.dataset.touched = "0";
+    routeStartKind = loadHome() ? "home" : userPos ? "pos" : null;
+    if (userPos) routePos = { lng: userPos.lng, lat: userPos.lat };
+    routeModal.classList.add("open");
+    renderRoute();
+  }
+  function closeRouteModal() { routeModal.classList.remove("open"); }
+
+  document.getElementById("route-btn").addEventListener("click", openRouteModal);
+  document.getElementById("route-close").addEventListener("click", closeRouteModal);
+  document.getElementById("route-cancel").addEventListener("click", closeRouteModal);
+  routeModal.addEventListener("click", (e) => { if (e.target === routeModal) closeRouteModal(); });
+  routeCountEl.addEventListener("input", () => { routeCountEl.dataset.touched = "1"; renderRoute(); });
+  routeLoopEl.addEventListener("change", renderRoute);
+  routeHomeBtn.addEventListener("click", () => { routeStartKind = "home"; renderRoute(); });
+  routeOpenEl.addEventListener("click", (e) => { if (routeOpenEl.classList.contains("disabled")) e.preventDefault(); else closeRouteModal(); });
+
+  routePosBtn.addEventListener("click", () => {
+    if (userPos) { routePos = { lng: userPos.lng, lat: userPos.lat }; routeStartKind = "pos"; renderRoute(); return; }
+    if (!navigator.geolocation) { showToast("Localisation non disponible sur ce navigateur.", "error"); return; }
+    routePosBtn.disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        routePosBtn.disabled = false;
+        routePos = { lng: pos.coords.longitude, lat: pos.coords.latitude };
+        routeStartKind = "pos";
+        renderRoute();
+      },
+      (err) => { routePosBtn.disabled = false; showToast(geoErrorMessage(err), "error"); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
+    );
+  });
+
+  // Definir son domicile : on masque la fenetre, un toucher sur la carte le fixe (memorise ici).
+  function startPicking() {
+    picking = true;
+    closeRouteModal();
+    pickBar.classList.add("show");
+    map.getCanvas().style.cursor = "crosshair";
+  }
+  function stopPicking(reopen) {
+    picking = false;
+    pickBar.classList.remove("show");
+    map.getCanvas().style.cursor = "";
+    if (reopen) { routeModal.classList.add("open"); renderRoute(); }
+  }
+  document.getElementById("route-pick").addEventListener("click", startPicking);
+  document.getElementById("pick-cancel").addEventListener("click", () => stopPicking(true));
+  map.on("click", (e) => {
+    // enregistre apres le gestionnaire de selection de cote, qui ignore le clic tant que `picking` est vrai
+    if (!picking) return;
+    saveHome({ lng: e.lngLat.lng, lat: e.lngLat.lat });
+    routeStartKind = "home";
+    stopPicking(true);
+    showToast("Domicile enregistré");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (picking) stopPicking(true); else if (routeModal.classList.contains("open")) closeRouteModal();
+  });
 
   document.getElementById("panel-close").addEventListener("click", () => {
     panelEl.style.display = "none";

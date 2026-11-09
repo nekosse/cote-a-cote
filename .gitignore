@@ -14,7 +14,7 @@ __pycache__/
 *.pmtiles
 *.pbf
 _work_pbf/
-frontend/by_tile/
+frontend/by_tile*/
 firebase_deploy/public/*.pmtiles
 
 # logs et etat de pipeline (regenerables)

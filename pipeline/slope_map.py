@@ -39,6 +39,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import rasterio
+from pyproj import Transformer
 from scipy.ndimage import gaussian_filter
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString, box
@@ -625,6 +626,23 @@ def _trunk_path(geometry, sample):
     return linemerge(segs) if len(segs) > 1 else segs[0]
 
 
+def _climb_ends(geometry, sample):
+    """Points de depart (bas) et d'arrivee (haut) d'une cote, dans le CRS de la
+    geometrie. Le sens de la ligne n'est PAS fiable (linemerge / _merge_connected
+    l'inversent a leur guise) : on prend les deux bouts du trace et on classe par
+    altitude. Utilise pour proposer un itineraire qui monte la cote dans le bon sens."""
+    if geometry.geom_type == "MultiLineString":
+        geometry = max(geometry.geoms, key=lambda g: g.length)
+    coords = list(geometry.coords)
+    if len(coords) < 2:
+        return None
+    p0, p1 = coords[0], coords[-1]
+    z = sample(np.array([p0[0], p1[0]]), np.array([p0[1], p1[1]]))
+    if not np.isnan(z).any() and z[0] > z[1]:
+        p0, p1 = p1, p0
+    return p0, p1  # (bas, haut)
+
+
 def _elevation_profile(geometry, sample, thresholds, n_points=20):
     """Echantillonne l'altitude a n_points repartis regulierement le long de
     la geometrie finale d'une cote (utilisee pour le mini-graphique de
@@ -797,6 +815,7 @@ def build_climbs(
         c["avg_grade"] = round(c["avg_grade"], 1)
         c["length_m"] = round(c["length_m"])
         c["elev_gain_m"] = round(c["elev_gain_m"])
+        c["ends"] = _climb_ends(c["geometry"], sample)
         profile = _elevation_profile(c["geometry"], sample, thresholds)
         c["profile"] = profile["elevations"]
         c["profile_grades"] = profile["grades"]
@@ -920,8 +939,17 @@ def _encode_profile(profile):
 def climbs_to_geojson(climbs, crs, thresholds):
     """Construit le FeatureCollection (WGS84) affiche sur la carte : une ligne
     fusionnee par cote, coloree selon sa pente moyenne."""
+    to_wgs = Transformer.from_crs(crs, 4326, always_xy=True)
+
+    def fmt_end(pt):
+        lon, lat = to_wgs.transform(pt[0], pt[1])
+        return f"{lon:.5f},{lat:.5f}"
+
     gdf = gpd.GeoDataFrame(
         [{"idx": c["idx"], "name": c["name"], "avg_grade": c["avg_grade"],
+          # bas et haut de la cote ("lon,lat") : servent a l'itineraire Geovelo
+          "bot": fmt_end(c["ends"][0]) if c.get("ends") else "",
+          "top": fmt_end(c["ends"][1]) if c.get("ends") else "",
           "length_m": c["length_m"], "elev_gain_m": c["elev_gain_m"],
           "surface": c["surface"],
           "profile": _encode_profile(c["profile"]),

@@ -82,6 +82,10 @@ class RangeHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    with socketserver.TCPServer(("", PORT), RangeHTTPRequestHandler) as httpd:
+    # Multi-connexions : avec TCPServer (une seule connexion a la fois), un navigateur qui garde
+    # une connexion ouverte et inactive bloquait toutes les autres (page qui ne charge plus).
+    socketserver.ThreadingTCPServer.daemon_threads = True
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    with socketserver.ThreadingTCPServer(("", PORT), RangeHTTPRequestHandler) as httpd:
         print(f"Serving with Range support on :{PORT}")
         httpd.serve_forever()
