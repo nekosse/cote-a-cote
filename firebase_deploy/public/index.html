@@ -336,7 +336,7 @@
     </div>
     <div class="field"><label class="check"><input type="checkbox" id="route-loop" checked> Revenir au point de départ (boucle)</label></div>
     <div id="route-summary"></div>
-    <p class="note">Les côtes les plus grosses (D+) sont retenues en premier, puis ordonnées pour limiter les allers-retours. Vous pourrez réordonner ou ajuster les étapes dans Geovelo.</p>
+    <p class="note">Les côtes les plus grosses (D+) sont retenues en premier, puis ordonnées pour limiter les allers-retours. Vous pourrez réordonner ou ajuster les étapes dans Geovelo. Un seul point que Geovelo ne sait pas placer sur une route suffit à faire échouer le calcul : si rien ne s'affiche, réduisez le nombre de côtes.</p>
     <div class="actions">
       <button type="button" id="route-cancel">Annuler</button>
       <a id="route-open" href="#" target="_blank" rel="noopener">Ouvrir dans Geovelo ↗</a>
@@ -1158,7 +1158,10 @@
   // Depuis la liste de zone : boucle qui monte chaque cote du bas vers le haut, au depart de
   // chez soi. Lien Geovelo : from=lon,lat & steps=lon,lat;lon,lat;... & to=lon,lat (format lu dans
   // le code public de geovelo.app : les etapes sont separees par ";").
-  const ROUTE_MAX_STEPS = 20; // prudence : la limite cote serveur Geovelo n'est pas connue
+  // Pas de plafond sur le nombre d'etapes cote Geovelo : testes jusqu'a 39 etapes (39 km, boucle de
+  // 3 h 20), tout passe. Seule borne : la longueur de l'URL (~23 caracteres par etape, ~7 000 au
+  // total pour rester sous les limites usuelles des navigateurs / CDN) -> 150 cotes max.
+  const ROUTE_MAX_CLIMBS = 150;
   const ROUTE_MIN_GAP_M = 25; // deux etapes plus proches que ca n'en font qu'une
 
   const routeModal = document.getElementById("route-modal");
@@ -1285,7 +1288,7 @@
 
   function renderRoute() {
     const all = climbsWithEnds();
-    const maxClimbs = Math.max(1, Math.min(all.length, Math.floor(ROUTE_MAX_STEPS / 2)));
+    const maxClimbs = Math.max(1, Math.min(all.length, ROUTE_MAX_CLIMBS));
     routeCountEl.max = String(maxClimbs);
     if (+routeCountEl.value > maxClimbs || routeCountEl.dataset.touched !== "1") routeCountEl.value = String(maxClimbs);
     document.getElementById("route-count-field").style.display = maxClimbs > 1 ? "" : "none";
